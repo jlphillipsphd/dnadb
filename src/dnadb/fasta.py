@@ -71,6 +71,7 @@ class FastaDb:
 
     def __init__(self, fasta_db_path: str|Path):
         super().__init__()
+        self.path = Path(fasta_db_path).absolute
         self.db = Lmdb.open(str(fasta_db_path))
 
     @cache

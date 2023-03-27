@@ -145,7 +145,7 @@ class FastqDb:
         db.close()
 
     def __init__(self, fastq_db_path: str|Path):
-        super().__init__()
+        self.path = Path(fastq_db_path).absolute
         self.db = Lmdb.open(str(fastq_db_path))
 
     @cache

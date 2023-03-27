@@ -201,11 +201,10 @@ class TaxonomyDb:
         db.update(chunk)
         db["length"] = np.int32(i + 1).tobytes()
         db["hierarchy"] = hierarchy.serialize()
-        print(len(hierarchy.taxons[0]))
         db.close()
 
     def __init__(self, taxonomy_db_path: str|Path):
-        super().__init__()
+        self.path = Path(taxonomy_db_path).absolute
         self.db = Lmdb.open(str(taxonomy_db_path))
         self.hierarchy = TaxonomyHierarchy.deserialize(self.db["hierarchy"])
 
