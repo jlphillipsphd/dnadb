@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dnadb"
+version = "0.1.0"
+authors = [
+  { name="David Ludwig", email="davidludwigii@gmail.com" },
+]
+description = "A library for handling DNA files."
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+  'scikit-bio ~= 0.5.8',
+]
+
+[project.urls]
+"Homepage" = "https://github.com/DLii-Research/dnadb"
+"Bug Tracker" = "https://github.com/DLii-Research/dnadb/issues"

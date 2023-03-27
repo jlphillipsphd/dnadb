@@ -1,0 +1,190 @@
+from functools import cache
+from lmdbm import Lmdb
+import numpy as np
+import numpy.typing as npt
+from pathlib import Path
+from typing import Generator, Iterable, TextIO
+
+from .utils import open_file
+
+def phred_encode(probabilities: npt.ArrayLike, encoding: int = 33) -> str:
+    scores = (-10 * np.log10(np.array(probabilities))).astype(int)
+    return ''.join((chr(score + encoding)) for score in scores)
+
+
+def phred_decode(qualities: str, encoding: int = 33) -> npt.NDArray[np.float64]:
+    scores = np.array([(ord(token) - encoding) for token in qualities])
+    return 10**(scores / -10)
+
+
+class FastqHeader:
+    """
+    A class representation of the sequence identifier of a FASTQ entry.
+    """
+    @classmethod
+    def deserialize(cls, sequence_id: bytes):
+        return cls.from_str(sequence_id.decode())
+
+    @classmethod
+    def from_str(cls, sequence_id: str) -> "FastqHeader":
+        # Split up the sequence ID information
+        left, right = sequence_id.strip()[1:].split(' ')
+        left = left.split(':')
+        right = right.split(':')
+        return cls(
+            instrument=left[0],
+            run_number=int(left[1]),
+            flowcell_id=left[2],
+            lane=int(left[3]),
+            tile=int(left[4]),
+            pos=tuple(map(int, left[5:])),
+            read_type=int(right[0]),
+            is_filtered=right[1] == 'Y',
+            control_number=int(right[2]),
+            sequence_index=right[3]
+        )
+
+    def __init__(
+        self,
+        instrument: str,
+        run_number: int,
+        flowcell_id: str,
+        lane: int,
+        tile: int,
+        pos: tuple[int, int],
+        read_type: int,
+        is_filtered: bool,
+        control_number: int,
+        sequence_index: str
+    ):
+        self.instrument = instrument
+        self.run_number = run_number
+        self.flowcell_id = flowcell_id
+        self.lane = lane
+        self.tile = tile
+        self.pos = pos
+        self.read_type = read_type
+        self.is_filtered = is_filtered
+        self.control_number = control_number
+        self.sequence_index = sequence_index
+
+    # Serialize a FastqHeader object to a byte string
+    def serialize(self) -> bytes:
+        return str(self).encode()
+
+    def __str__(self):
+        sequence_id = '@'
+        sequence_id += ':'.join(map(str, [
+            self.instrument,
+            self.run_number,
+            self.flowcell_id,
+            self.lane,
+            self.tile,
+            *self.pos
+        ]))
+        sequence_id += ' '
+        sequence_id += ':'.join(map(str, [
+            self.read_type,
+            'Y' if self.is_filtered else 'N',
+            self.control_number,
+            self.sequence_index
+        ]))
+        return sequence_id
+
+    def __repr__(self):
+        return str(self)
+
+
+class FastqEntry:
+    """
+    A class representation of a FASTQ entry containing the sequnce identifier, sequence, and quality
+    scores.
+    """
+    @classmethod
+    def deserialize(cls, entry: bytes) -> "FastqEntry":
+        return cls.from_str(entry.decode())
+
+    @classmethod
+    def from_str(cls, entry: str) -> "FastqEntry":
+        header, sequence, _, quality_scores= entry.rstrip().split('\n')
+        return FastqEntry(FastqHeader.from_str(header), sequence, quality_scores)
+
+    def __init__(
+        self,
+        header: FastqHeader,
+        sequence: str,
+        quality_scores: str,
+    ):
+        self.header = header
+        self.sequence = sequence.strip()
+        self.quality_scores = quality_scores.strip()
+
+    def serialize(self) -> bytes:
+        return str(self).encode()
+
+    def __str__(self):
+        return f"{self.header}\n{self.sequence}\n+\n{self.quality_scores}"
+
+    def __repr__(self):
+        return "FastqEntry:\n" + '\n'.join(f"  {s}" for s in str(self).split('\n'))
+
+
+class FastqDb:
+    @classmethod
+    def create(cls, fastq_path: str|Path, fastq_db_path: str|Path, chunk_size=10000) -> None:
+        db = Lmdb.open(str(fastq_db_path), 'n')
+        chunk: dict[str, bytes] = {}
+        i: int = 0
+        for i, entry in enumerate(entries(fastq_path)):
+            chunk[str(i)] = entry.serialize()
+            if i > 0 and i % chunk_size == 0:
+                db.update(chunk)
+                chunk.clear()
+        db.update(chunk)
+        db["length"] = np.int32(i + 1).tobytes()
+        db.close()
+
+    def __init__(self, fastq_db_path: str|Path):
+        super().__init__()
+        self.db = Lmdb.open(str(fastq_db_path))
+
+    @cache
+    def __len__(self):
+        return np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+
+    def __getitem__(self, sequence_index: int) -> FastqEntry:
+        return FastqEntry.deserialize(self.db[str(sequence_index)])
+
+
+def entries(sequences: TextIO|Iterable[FastqEntry]|str|Path) -> Iterable[FastqEntry]:
+    """
+    Create an iterator over a FASTA file or iterable of FASTA entries.
+    """
+    if isinstance(sequences, (str, Path)):
+        with open_file(sequences, 'r') as buffer:
+            yield from read(buffer)
+    elif isinstance(sequences, TextIO):
+        yield from read(sequences)
+    else:
+        yield from sequences
+
+
+def read(buffer: TextIO) -> Generator[FastqEntry, None, None]:
+    """
+    Read entries from a FASTQ file buffer.
+    """
+    line = buffer.readline()
+    while len(line) > 0:
+        entry_str = "".join((line, *(buffer.readline() for _ in range(3))))
+        yield FastqEntry.from_str(entry_str)
+        line = buffer.readline()
+
+
+def write(buffer: TextIO, entries: Iterable[FastqEntry]) -> int:
+    """
+    Write entries to a FASTQ file.
+    """
+    bytes_written = 0
+    for entry in entries:
+        bytes_written += buffer.write(str(entry) + '\n')
+    return bytes_written
