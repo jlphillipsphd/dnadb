@@ -24,3 +24,6 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/DLii-Research/dnadb"
 "Bug Tracker" = "https://github.com/DLii-Research/dnadb/issues"
+
+[tool.ruff]
+line-length = 100
