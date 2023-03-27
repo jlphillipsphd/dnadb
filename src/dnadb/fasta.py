@@ -52,14 +52,14 @@ class FastaDb:
     An LMDB-backed database of FASTA entries
     """
     @classmethod
-    def create(cls, fasta_path: str|Path, fasta_db_path: str|Path, chunk_size=10000) -> None:
+    def create(cls, fasta_entries: Iterable[FastaEntry], fasta_db_path: str|Path, chunk_size=10000):
         """
         Create a new FASTA LMDB database from a FASTA file
         """
         db = Lmdb.open(str(fasta_db_path), 'n')
         chunk: dict[str, bytes] = {}
         i: int = 0
-        for i, entry in enumerate(entries(fasta_path)):
+        for i, entry in enumerate(fasta_entries):
             chunk[f"id_{entry.identifier}"] = np.int32(i).tobytes()
             chunk[str(i)] = entry.serialize()
             if i > 0 and i % chunk_size == 0:

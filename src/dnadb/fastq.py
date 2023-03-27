@@ -131,11 +131,11 @@ class FastqEntry:
 
 class FastqDb:
     @classmethod
-    def create(cls, fastq_path: str|Path, fastq_db_path: str|Path, chunk_size=10000) -> None:
+    def create(cls, fastq_entries: Iterable[FastqEntry], fastq_db_path: str|Path, chunk_size=10000):
         db = Lmdb.open(str(fastq_db_path), 'n')
         chunk: dict[str, bytes] = {}
         i: int = 0
-        for i, entry in enumerate(entries(fastq_path)):
+        for i, entry in enumerate(fastq_entries):
             chunk[str(i)] = entry.serialize()
             if i > 0 and i % chunk_size == 0:
                 db.update(chunk)
