@@ -5,6 +5,7 @@ import numpy.typing as npt
 from pathlib import Path
 from typing import Generator, Iterable, TextIO
 
+from .db import DbFactory
 from .utils import open_file
 
 def phred_encode(probabilities: npt.ArrayLike, encoding: int = 33) -> str:
@@ -129,21 +130,31 @@ class FastqEntry:
         return "FastqEntry:\n" + '\n'.join(f"  {s}" for s in str(self).split('\n'))
 
 
-class FastqDb:
-    @classmethod
-    def create(cls, fastq_entries: Iterable[FastqEntry], fastq_db_path: str|Path, chunk_size=10000):
-        db = Lmdb.open(str(fastq_db_path), 'n')
-        chunk: dict[str, bytes] = {}
-        i: int = 0
-        for i, entry in enumerate(fastq_entries):
-            chunk[str(i)] = entry.serialize()
-            if i > 0 and i % chunk_size == 0:
-                db.update(chunk)
-                chunk.clear()
-        db.update(chunk)
-        db["length"] = np.int32(i + 1).tobytes()
-        db.close()
+class FastqDbFactory(DbFactory):
+    """
+    A factory for creating LMDB-backed databases of FASTA entries.
+    """
+    def __init__(self, path: str|Path, chunk_size: int = 10000):
+        super().__init__(path, chunk_size)
+        self.num_entries = np.int32(0)
 
+    def write_entry(self, entry: FastqEntry):
+        """
+        Create a new FASTA LMDB database from a FASTA file.
+        """
+        self.write(str(self.num_entries), entry.serialize())
+        self.num_entries += 1
+
+    def write_entries(self, entries: Iterable[FastqEntry]):
+        for entry in entries:
+            self.write_entry(entry)
+
+    def close(self):
+        self.write("length", self.num_entries.tobytes())
+        super().close()
+
+
+class FastqDb:
     def __init__(self, fastq_db_path: str|Path):
         self.path = Path(fastq_db_path).absolute
         self.db = Lmdb.open(str(fastq_db_path))

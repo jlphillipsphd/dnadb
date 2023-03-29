@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from typing import Generator, Iterable, TextIO
 
+from .db import DbFactory
 from .taxonomy import TaxonomyEntry
 from .utils import open_file
 
@@ -47,28 +48,35 @@ class FastaEntry:
         return str(self)
 
 
+class FastaDbFactory(DbFactory):
+    """
+    A factory for creating LMDB-backed databases of FASTA entries.
+    """
+    def __init__(self, path: str|Path, chunk_size: int = 10000):
+        super().__init__(path, chunk_size)
+        self.num_entries = np.int32(0)
+
+    def write_entry(self, entry: FastaEntry):
+        """
+        Create a new FASTA LMDB database from a FASTA file.
+        """
+        self.write(f"id_{entry.identifier}", np.int32(self.num_entries).tobytes())
+        self.write(str(self.num_entries), entry.serialize())
+        self.num_entries += 1
+
+    def write_entries(self, entries: Iterable[FastaEntry]):
+        for entry in entries:
+            self.write_entry(entry)
+
+    def close(self):
+        self.write("length", self.num_entries.tobytes())
+        super().close()
+
+
 class FastaDb:
     """
-    An LMDB-backed database of FASTA entries
+    An LMDB-backed database of FASTA entries.
     """
-    @classmethod
-    def create(cls, fasta_entries: Iterable[FastaEntry], fasta_db_path: str|Path, chunk_size=10000):
-        """
-        Create a new FASTA LMDB database from a FASTA file
-        """
-        db = Lmdb.open(str(fasta_db_path), 'n')
-        chunk: dict[str, bytes] = {}
-        i: int = 0
-        for i, entry in enumerate(fasta_entries):
-            chunk[f"id_{entry.identifier}"] = np.int32(i).tobytes()
-            chunk[str(i)] = entry.serialize()
-            if i > 0 and i % chunk_size == 0:
-                db.update(chunk)
-                chunk.clear()
-        db.update(chunk)
-        db["length"] = np.int32(i + 1).tobytes()
-        db.close()
-
     def __init__(self, fasta_db_path: str|Path):
         super().__init__()
         self.path = Path(fasta_db_path).absolute

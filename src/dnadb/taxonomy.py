@@ -1,4 +1,4 @@
-from functools import cache
+from functools import cache, cached_property
 import json
 from lmdbm import Lmdb
 import numpy as np
@@ -6,13 +6,15 @@ from pathlib import Path
 import re
 from typing import Generator, Iterable, TextIO, TypedDict
 
+from .db import DbFactory
 from .utils import open_file
 
 TAXON_PREFIXES = "kpcofgs"
 
 class TaxonHierarchyJson(TypedDict):
-    taxons: list[list[str]]
+    taxon_values: list[list[str]]
     children: dict[str, list[str]]
+    parents: dict[str, str]
 
 # Utility Functions --------------------------------------------------------------------------------
 
@@ -33,7 +35,7 @@ def join_taxonomy(taxonomy: tuple[str]|list[str], depth: int = 7) -> str:
     return "; ".join([f"{TAXON_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
 
 
-def unique_labels(entries: Iterable["TaxonomyEntry"]) -> Generator["TaxonomyEntry", None, None]:
+def unique_labels(entries: Iterable["TaxonomyEntry"]) -> Generator[str, None, None]:
     """
     Iterate over all unique taxonomy labels.
     """
@@ -42,7 +44,7 @@ def unique_labels(entries: Iterable["TaxonomyEntry"]) -> Generator["TaxonomyEntr
         if entry.label in m:
             continue
         m[entry.label] = entry
-        yield entry
+        yield entry.label
 
 
 def unique_taxons(entries: Iterable["TaxonomyEntry"], depth: int = 7) -> list[set[str]]:
@@ -61,16 +63,24 @@ class TaxonomyHierarchy:
     @classmethod
     def deserialize(cls, taxonomy_hierarchy: bytes) -> "TaxonomyHierarchy":
         hierarchy_json: TaxonHierarchyJson = json.loads(taxonomy_hierarchy.decode())
-        hierarchy = TaxonomyHierarchy(len(hierarchy_json["taxons"]))
-        hierarchy.taxons = hierarchy_json["taxons"]
+        hierarchy = TaxonomyHierarchy(len(hierarchy_json["taxon_values"]))
+        hierarchy.taxon_values = hierarchy_json["taxon_values"]
         hierarchy.children.update({t: set(c) for t, c in hierarchy_json["children"].items()})
+        hierarchy.parents = hierarchy_json["parents"]
         return hierarchy
 
     @classmethod
     def from_entries(cls, entries: Iterable["TaxonomyEntry"], depth: int = 7):
         hierarchy = TaxonomyHierarchy(depth)
-        for entry in unique_labels(entries):
-            hierarchy.add_entry(entry)
+        for label in unique_labels(entries):
+            hierarchy.add_taxons(split_taxonomy(label))
+        return hierarchy
+
+    @classmethod
+    def from_labels(cls, labels: Iterable[str], depth: int = 7):
+        hierarchy = TaxonomyHierarchy(depth)
+        for label in set(labels):
+            hierarchy.add_taxons(split_taxonomy(label))
         return hierarchy
 
     @classmethod
@@ -85,28 +95,30 @@ class TaxonomyHierarchy:
         merged_hierarchy = TaxonomyHierarchy(depth)
         for hierarchy in hierarchy_list:
             for i in range(depth):
-                for taxon in hierarchy.taxons[i]:
+                for taxon in hierarchy.taxon_values[i]:
                     if taxon not in merged_hierarchy.children:
-                        merged_hierarchy.taxons[i].append(taxon)
+                        merged_hierarchy.taxon_values[i].append(taxon)
                         merged_hierarchy.children[taxon] = set()
                     merged_hierarchy.children[taxon].update(hierarchy.children[taxon])
         return merged_hierarchy
 
     def __init__(self, depth: int = 7):
-        self.taxons: list[list[str]] = [[] for _ in range(depth)]
+        self.taxon_values: list[list[str]] = [[] for _ in range(depth)]
         self.children: dict[str, set[str]] = {}
+        self.parents: dict[str, str] = {}
 
     def add_entry(self, entry: "TaxonomyEntry"):
         self.add_taxons(entry.taxons(self.depth))
 
     def add_taxons(self, taxons: tuple[str, ...]):
         parent = ""
-        for taxon_level, taxon in zip(self.taxons, taxons):
+        for taxon_level, taxon in zip(self.taxon_values, taxons):
             if taxon not in self.children:
                 taxon_level.append(taxon)
                 self.children[taxon] = set()
             if parent != "":
                 self.children[parent].add(taxon)
+                self.parents[taxon] = parent
             parent = taxon
 
     def is_valid(self, taxons: str|tuple[str, ...]) -> bool:
@@ -134,10 +146,22 @@ class TaxonomyHierarchy:
             reduced_taxons[i] = taxon
         return tuple(reduced_taxons)
 
+    def taxonomy(self, taxon: str) -> str:
+        return join_taxonomy(self.taxons(taxon), len(self.taxon_values))
+
+    def taxons(self, taxon: str) -> tuple[str, ...]:
+        values = [taxon]
+        while taxon in self.parents:
+            taxon = self.parents[taxon]
+            values.append(taxon)
+        padding = ('0',)*(len(self.taxon_values) - len(values))
+        return tuple(reversed(values)) + padding
+
     def serialize(self) -> bytes:
         json_hierarchy: TaxonHierarchyJson = {
-            "taxons": self.taxons,
-            "children": {taxon: list(children) for taxon, children in self.children.items()}
+            "taxon_values": self.taxon_values,
+            "children": {taxon: list(children) for taxon, children in self.children.items()},
+            "parents": self.parents
         }
         return json.dumps(json_hierarchy, separators=(',', ':')).encode()
 
@@ -146,7 +170,7 @@ class TaxonomyHierarchy:
 
     @property
     def depth(self):
-        return len(self.taxons)
+        return len(self.taxon_values)
 
 
 class TaxonomyEntry:
@@ -180,37 +204,45 @@ class TaxonomyEntry:
         return f"{self.identifier}\t{self.label}"
 
 
-class TaxonomyDb:
-    @classmethod
-    def create(
-        cls,
-        taxonomy_entries: Iterable[TaxonomyEntry],
-        taxonomy_db_path: str|Path,
-        chunk_size=10000
-    ):
-        db = Lmdb.open(str(taxonomy_db_path), 'n')
-        chunk: dict[str, bytes] = {}
-        i: int = 0
-        hierarchy = TaxonomyHierarchy()
-        for i, entry in enumerate(taxonomy_entries):
-            hierarchy.add_entry(entry)
-            chunk[entry.identifier] = entry.serialize()
-            if i > 0 and i % chunk_size == 0:
-                db.update(chunk)
-                chunk.clear()
-        db.update(chunk)
-        db["length"] = np.int32(i + 1).tobytes()
-        db["hierarchy"] = hierarchy.serialize()
-        db.close()
+class TaxonomyDbFactory(DbFactory):
+    """
+    A factory for creating LMDB-backed databases of FASTA entries.
+    """
+    def __init__(self, path: str|Path, chunk_size: int = 10000):
+        super().__init__(path, chunk_size)
+        self.hierarchy = TaxonomyHierarchy()
+        self.num_entries = np.int32(0)
 
+    def write_entry(self, entry: TaxonomyEntry):
+        """
+        Create a new FASTA LMDB database from a FASTA file.
+        """
+        self.hierarchy.add_entry(entry)
+        self.write(entry.identifier, entry.serialize())
+        self.num_entries += 1
+
+    def write_entries(self, entries: Iterable[TaxonomyEntry]):
+        for entry in entries:
+            self.write_entry(entry)
+
+    def close(self):
+        self.write("hierarchy", self.hierarchy.serialize())
+        self.write("length", self.num_entries.tobytes())
+        super().close()
+
+
+class TaxonomyDb:
     def __init__(self, taxonomy_db_path: str|Path):
         self.path = Path(taxonomy_db_path).absolute
         self.db = Lmdb.open(str(taxonomy_db_path))
-        self.hierarchy = TaxonomyHierarchy.deserialize(self.db["hierarchy"])
 
     @cache
     def __len__(self):
         return np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+
+    @cached_property
+    def hierarchy(self):
+        return TaxonomyHierarchy.deserialize(self.db["hierarchy"])
 
     def __getitem__(self, sequence_id: str) -> TaxonomyEntry:
         return TaxonomyEntry.deserialize(self.db[sequence_id])
