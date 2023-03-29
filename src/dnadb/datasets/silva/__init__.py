@@ -90,13 +90,11 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
         compress(taxonomy_file_path)
 
     def __fasta_file_name(self) -> str:
-        match self.preprocessing:
-            case Preprocessing.Truncated:
-                suffix = "_trunc"
-            case Preprocessing.FullAligned:
-                suffix = "_full_align"
-            case _:
-                suffix = ""
+        suffix = ""
+        if self.preprocessing == Preprocessing.Truncated:
+            suffix = "_trunc"
+        elif self.preprocessing == Preprocessing.FullAligned:
+            suffix = "_full_align"
         filename = "SILVA_{}_{}{}_tax_silva{}.fasta.gz".format(
             self.version,
             self.subunit.name,
@@ -104,15 +102,12 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
             suffix)
         return filename
 
-
     def __taxonomy_file_path(self, name: str) -> Path:
-        match self.group:
-            case Group.Parc | Group.Ref:
-                group = self.group.name.lower()
-            case Group.RefNr99:
-                group = "ref_nr"
-            case _:
-                group = ""
+        group = ""
+        if self.group in (Group.Parc, Group.Ref):
+            group = self.group.name.lower()
+        elif self.group == Group.RefNr99:
+            group = "ref_nr"
         prefix = Path(f"release_{self.version}/Exports/taxonomy")
         filename = name.format(subunit=self.subunit.name.lower(), group=group, version=self.version)
         return prefix / filename
