@@ -58,7 +58,7 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
         def map_to_dna(entry: fasta.FastaEntry) -> fasta.FastaEntry:
             entry.sequence = to_dna(entry.sequence)
             return entry
-        entry_iterator = fasta.iterator(self.path / self.__rna_fasta_file)
+        entry_iterator = fasta.entries(self.path / self.__rna_fasta_file)
         entry_iterator = map(map_to_dna, entry_iterator)
         with open(fasta_path, 'w') as file:
             fasta.write(file, entry_iterator)
