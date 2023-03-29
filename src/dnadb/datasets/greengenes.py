@@ -1,5 +1,6 @@
 from functools import cached_property
 from pathlib import Path
+from typing import Optional, Union
 
 from .dataset import VersionedDataset, RemoteDatasetMixin, InterfacesWithFasta, \
     InterfacesWithTaxonomy
@@ -14,7 +15,7 @@ class Greengenes(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Inte
 
     def __init__(
         self,
-        path: str|Path|None = None,
+        path: Optional[Union[str, Path]] = None,
         version: str = DEFAULT_VERSION,
         force_download: bool = False
     ):

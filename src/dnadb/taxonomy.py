@@ -4,7 +4,7 @@ from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
 import re
-from typing import Generator, Iterable, TextIO, TypedDict
+from typing import Generator, Iterable, List, TextIO, Tuple, TypedDict, Union
 
 from .db import DbFactory
 from .utils import open_file
@@ -12,20 +12,20 @@ from .utils import open_file
 TAXON_PREFIXES = "kpcofgs"
 
 class TaxonHierarchyJson(TypedDict):
-    taxon_values: list[list[str]]
-    children: dict[str, list[str]]
+    taxon_values: List[List[str]]
+    children: dict[str, List[str]]
     parents: dict[str, str]
 
 # Utility Functions --------------------------------------------------------------------------------
 
-def split_taxonomy(taxonomy: str, max_depth: int = 7) -> tuple[str, ...]:
+def split_taxonomy(taxonomy: str, max_depth: int = 7) -> Tuple[str, ...]:
     """
     Split taxonomy label into a tuple
     """
     return tuple(re.findall(r"\w__([^;]+)", taxonomy))[:max_depth]
 
 
-def join_taxonomy(taxonomy: tuple[str]|list[str], depth: int = 7) -> str:
+def join_taxonomy(taxonomy: Union[Tuple[str], List[str]], depth: int = 7) -> str:
     """
     Merge a taxonomy tuple into a string format
     """
@@ -47,11 +47,11 @@ def unique_labels(entries: Iterable["TaxonomyEntry"]) -> Generator[str, None, No
         yield entry.label
 
 
-def unique_taxons(entries: Iterable["TaxonomyEntry"], depth: int = 7) -> list[set[str]]:
+def unique_taxons(entries: Iterable["TaxonomyEntry"], depth: int = 7) -> List[set[str]]:
     """
     Pull each taxon as a set
     """
-    taxon_sets: list[set[str]] = [set() for _ in range(depth)]
+    taxon_sets: List[set[str]] = [set() for _ in range(depth)]
     for entry in entries:
         for taxon_set, taxon in zip(taxon_sets, entry.taxons(depth)):
             taxon_set.add(taxon)
@@ -103,14 +103,14 @@ class TaxonomyHierarchy:
         return merged_hierarchy
 
     def __init__(self, depth: int = 7):
-        self.taxon_values: list[list[str]] = [[] for _ in range(depth)]
+        self.taxon_values: List[List[str]] = [[] for _ in range(depth)]
         self.children: dict[str, set[str]] = {}
         self.parents: dict[str, str] = {}
 
     def add_entry(self, entry: "TaxonomyEntry"):
         self.add_taxons(entry.taxons(self.depth))
 
-    def add_taxons(self, taxons: tuple[str, ...]):
+    def add_taxons(self, taxons: Tuple[str, ...]):
         parent = ""
         for taxon_level, taxon in zip(self.taxon_values, taxons):
             if taxon not in self.children:
@@ -121,7 +121,7 @@ class TaxonomyHierarchy:
                 self.parents[taxon] = parent
             parent = taxon
 
-    def is_valid(self, taxons: str|tuple[str, ...]) -> bool:
+    def is_valid(self, taxons: Union[str, Tuple[str, ...]]) -> bool:
         taxon_list = split_taxonomy(taxons) if isinstance(taxons, str) else taxons
         for taxon in taxon_list:
             if taxon not in self.children:
@@ -135,11 +135,11 @@ class TaxonomyHierarchy:
         reduced_label = join_taxonomy(self.reduce_taxons(entry.taxons()))
         return TaxonomyEntry(entry.identifier, reduced_label)
 
-    def reduce_taxons(self, taxons: tuple[str]) -> tuple[str]:
+    def reduce_taxons(self, taxons: Tuple[str]) -> Tuple[str]:
         """
         Reduce the provided taxons to a valid taxonomy in this hierarchy.
         """
-        reduced_taxons: list[str] = [""]*len(taxons)
+        reduced_taxons: List[str] = [""]*len(taxons)
         for i, taxon in enumerate(taxons):
             if taxon not in self.children:
                 break
@@ -149,7 +149,7 @@ class TaxonomyHierarchy:
     def taxonomy(self, taxon: str) -> str:
         return join_taxonomy(self.taxons(taxon), len(self.taxon_values))
 
-    def taxons(self, taxon: str) -> tuple[str, ...]:
+    def taxons(self, taxon: str) -> Tuple[str, ...]:
         values = [taxon]
         while taxon in self.parents:
             taxon = self.parents[taxon]
@@ -191,7 +191,7 @@ class TaxonomyEntry:
         self.identifier = identifier
         self.label = label
 
-    def taxons(self, depth: int = 7) -> tuple[str, ...]:
+    def taxons(self, depth: int = 7) -> Tuple[str, ...]:
         return split_taxonomy(self.label, depth)
 
     def serialize(self) -> bytes:
@@ -208,7 +208,7 @@ class TaxonomyDbFactory(DbFactory):
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
-    def __init__(self, path: str|Path, chunk_size: int = 10000):
+    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         super().__init__(path, chunk_size)
         self.hierarchy = TaxonomyHierarchy()
         self.num_entries = np.int32(0)
@@ -232,7 +232,7 @@ class TaxonomyDbFactory(DbFactory):
 
 
 class TaxonomyDb:
-    def __init__(self, taxonomy_db_path: str|Path):
+    def __init__(self, taxonomy_db_path: Union[str, Path]):
         self.path = Path(taxonomy_db_path).absolute
         self.db = Lmdb.open(str(taxonomy_db_path))
 
@@ -248,7 +248,7 @@ class TaxonomyDb:
         return TaxonomyEntry.deserialize(self.db[sequence_id])
 
 
-def entries(taxonomy: TextIO|Iterable[TaxonomyEntry]|str|Path) -> Iterable[TaxonomyEntry]:
+def entries(taxonomy: Union[TextIO, Iterable[TaxonomyEntry], str, Path]) -> Iterable[TaxonomyEntry]:
     """
     Create an iterator over a taxonomy file or iterable of taxonomy entries.
     """

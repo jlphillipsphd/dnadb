@@ -2,7 +2,7 @@ import abc
 import os
 from pathlib import Path
 from tqdm.auto import tqdm
-from typing import Generator
+from typing import Generator, List, Optional, Tuple, Union
 
 from .. import fasta, fastq
 
@@ -11,7 +11,7 @@ from ..utils import open_file, download
 
 # Utility Functions --------------------------------------------------------------------------------
 
-def __has_methods(subclass: object, methods: list[str]):
+def __has_methods(subclass: object, methods: List[str]):
     """
     Determine if a class has all the methods in the list.
     """
@@ -38,7 +38,7 @@ class Dataset(abc.ABC, IPathProvider):
 
     NAME: str
 
-    def __init__(self, path: str|Path|None = None):
+    def __init__(self, path: Optional[Union[str, Path]] = None):
         if path is None:
             self.__path = Path(os.environ["DATASETS_PATH"]) / self.name
         else:
@@ -55,7 +55,7 @@ class Dataset(abc.ABC, IPathProvider):
 
 
 class VersionedDataset(Dataset):
-    def __init__(self, version: str, path: str|Path|None = None):
+    def __init__(self, version: str, path: Optional[Union[str, Path]] = None):
         super().__init__(path=path)
         self.version = version
 
@@ -102,7 +102,7 @@ class RemoteDatasetMixin(IPathProvider, metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def remote_files(self) -> list[Path]:
+    def remote_files(self) -> List[Path]:
         """
         The list of remote files for this dataset.
         """
@@ -134,7 +134,7 @@ class InterfacesWithFasta(abc.ABC, IPathProvider):
 
     @property
     @abc.abstractmethod
-    def fasta_file(self) -> str|Path:
+    def fasta_file(self) -> Union[str, Path]:
         raise NotImplementedError()
 
 
@@ -148,7 +148,7 @@ class InterfacesWithFastq(abc.ABC, IPathProvider):
 
     @property
     @abc.abstractmethod
-    def fastq_file(self) -> str|Path:
+    def fastq_file(self) -> Union[str, Path]:
         raise NotImplementedError()
 
 
@@ -162,7 +162,7 @@ class InterfacesWithTaxonomy(abc.ABC, IPathProvider):
 
     @property
     @abc.abstractmethod
-    def taxonomy_file(self) -> str|Path:
+    def taxonomy_file(self) -> Union[str, Path]:
         raise NotImplementedError()
 
 
@@ -171,7 +171,7 @@ class InterfacesWithFastas(abc.ABC, IPathProvider):
     def __subclasshook__(cls, subclass):
         return __has_methods(subclass, ["sequences", "fasta_files"]) or NotImplemented
 
-    def sequences(self) -> Generator[tuple[str, fasta.FastaEntry], None, None]:
+    def sequences(self) -> Generator[Tuple[str, fasta.FastaEntry], None, None]:
         for path in self.fasta_files:
             sample_file_name = Path(path).name
             with open_file(self.path / path) as file:
@@ -180,7 +180,7 @@ class InterfacesWithFastas(abc.ABC, IPathProvider):
 
     @property
     @abc.abstractmethod
-    def fasta_files(self) -> list[str|Path]:
+    def fasta_files(self) -> List[Union[str, Path]]:
         raise NotImplementedError()
 
 
@@ -189,7 +189,7 @@ class InterfacesWithFastqs(abc.ABC, IPathProvider):
     def __subclasshook__(cls, subclass):
         return __has_methods(subclass, ["sequences", "fastq_files"]) or NotImplemented
 
-    def sequences(self) -> Generator[tuple[str, fastq.FastqEntry], None, None]:
+    def sequences(self) -> Generator[Tuple[str, fastq.FastqEntry], None, None]:
         for path in self.fastq_files:
             sample_file_name = Path(path).name
             with open_file(self.path / path) as file:
@@ -198,7 +198,7 @@ class InterfacesWithFastqs(abc.ABC, IPathProvider):
 
     @property
     @abc.abstractmethod
-    def fastq_files(self) -> list[str|Path]:
+    def fastq_files(self) -> List[Union[str, Path]]:
         raise NotImplementedError()
 
 
@@ -207,7 +207,7 @@ class InterfacesWithTaxonomies(abc.ABC, IPathProvider):
     def __subclasshook__(cls, subclass):
         return __has_methods(subclass, ["taxonomies", "taxonomy_files"]) or NotImplemented
 
-    def taxonomies(self) -> Generator[tuple[str, taxonomy.TaxonomyEntry], None, None]:
+    def taxonomies(self) -> Generator[Tuple[str, taxonomy.TaxonomyEntry], None, None]:
         for path in self.taxonomy_files:
             taxonomy_file_name = Path(path).name
             with open_file(self.path / path) as file:
@@ -216,5 +216,5 @@ class InterfacesWithTaxonomies(abc.ABC, IPathProvider):
 
     @property
     @abc.abstractmethod
-    def taxonomy_files(self) -> list[str|Path]:
+    def taxonomy_files(self) -> List[Union[str, Path]]:
         raise NotImplementedError()

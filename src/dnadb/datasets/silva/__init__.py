@@ -1,14 +1,15 @@
 import enum
 from functools import cached_property
 from pathlib import Path
+from typing import List, Optional, Union
 
-from ... import fasta
 
 from . import taxonomy_map as taxmap
 from ..dataset import VersionedDataset, RemoteDatasetMixin, InterfacesWithFasta, \
     InterfacesWithTaxonomy
 from ...dna import to_dna
 from ...utils import compress, open_file
+from ... import fasta
 
 class Subunit(enum.Enum):
     LSU = enum.auto() # Large subunit (23S/28S ribosomal RNA)
@@ -34,7 +35,7 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
 
     def __init__(
         self,
-        path: str|Path|None = None,
+        path: Optional[Union[str, Path]] = None,
         version: str = DEFAULT_VERSION,
         subunit: Subunit = Subunit.SSU,
         group: Group = Group.Ref,
@@ -51,7 +52,6 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
             self.__build_taxonomy_map()
 
     def __build_dna_fasta(self):
-        import subprocess
         print("Converting FASTA to DNA...")
         fasta_path = str(self.path / self.fasta_file)[:-3] # remove .gz extension
 
@@ -67,7 +67,6 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
         compress(fasta_path)
 
     def __build_taxonomy_map(self):
-        import subprocess
         print("Building taxonomy map...")
 
         taxonomy_file_path = str(self.path / self.taxonomy_file)[:-3] # remove .gz extension
@@ -121,7 +120,7 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
         return self.BASE_URL
 
     @property
-    def remote_files(self) -> list[Path]:
+    def remote_files(self) -> List[Path]:
         return [
             self.__rna_fasta_file,
             self.__taxonomy_file,

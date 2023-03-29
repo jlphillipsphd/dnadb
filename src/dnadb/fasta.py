@@ -2,7 +2,7 @@ from functools import cache, singledispatchmethod
 from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
-from typing import Generator, Iterable, TextIO
+from typing import Generator, Iterable, TextIO, Tuple, Union
 
 from .db import DbFactory
 from .taxonomy import TaxonomyEntry
@@ -52,7 +52,7 @@ class FastaDbFactory(DbFactory):
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
-    def __init__(self, path: str|Path, chunk_size: int = 10000):
+    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         super().__init__(path, chunk_size)
         self.num_entries = np.int32(0)
 
@@ -77,7 +77,7 @@ class FastaDb:
     """
     An LMDB-backed database of FASTA entries.
     """
-    def __init__(self, fasta_db_path: str|Path):
+    def __init__(self, fasta_db_path: Union[str, Path]):
         super().__init__()
         self.path = Path(fasta_db_path).absolute
         self.db = Lmdb.open(str(fasta_db_path))
@@ -96,7 +96,7 @@ class FastaDb:
         return self[index]
 
 
-def entries(sequences: TextIO|Iterable[FastaEntry]|str|Path) -> Iterable[FastaEntry]:
+def entries(sequences: Union[TextIO, Iterable[FastaEntry], str, Path]) -> Iterable[FastaEntry]:
     """
     Create an iterator over a FASTA file or iterable of FASTA entries.
     """
@@ -112,7 +112,7 @@ def entries(sequences: TextIO|Iterable[FastaEntry]|str|Path) -> Iterable[FastaEn
 def entries_with_taxonomy(
     sequences: Iterable[FastaEntry],
     taxonomies: Iterable[TaxonomyEntry],
-) -> Generator[tuple[FastaEntry, TaxonomyEntry], None, None]:
+) -> Generator[Tuple[FastaEntry, TaxonomyEntry], None, None]:
     """
     Efficiently iterate over a FASTA file with a corresponding taxonomy file
     """

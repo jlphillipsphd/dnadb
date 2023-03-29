@@ -3,7 +3,7 @@ from lmdbm import Lmdb
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
-from typing import Generator, Iterable, TextIO
+from typing import Generator, Iterable, TextIO, Tuple, Union
 
 from .db import DbFactory
 from .utils import open_file
@@ -52,7 +52,7 @@ class FastqHeader:
         flowcell_id: str,
         lane: int,
         tile: int,
-        pos: tuple[int, int],
+        pos: Tuple[int, int],
         read_type: int,
         is_filtered: bool,
         control_number: int,
@@ -134,7 +134,7 @@ class FastqDbFactory(DbFactory):
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
-    def __init__(self, path: str|Path, chunk_size: int = 10000):
+    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         super().__init__(path, chunk_size)
         self.num_entries = np.int32(0)
 
@@ -155,7 +155,7 @@ class FastqDbFactory(DbFactory):
 
 
 class FastqDb:
-    def __init__(self, fastq_db_path: str|Path):
+    def __init__(self, fastq_db_path: Union[str, Path]):
         self.path = Path(fastq_db_path).absolute
         self.db = Lmdb.open(str(fastq_db_path))
 
@@ -167,7 +167,7 @@ class FastqDb:
         return FastqEntry.deserialize(self.db[str(sequence_index)])
 
 
-def entries(sequences: TextIO|Iterable[FastqEntry]|str|Path) -> Iterable[FastqEntry]:
+def entries(sequences: Union[TextIO, Iterable[FastqEntry], str, Path]) -> Iterable[FastqEntry]:
     """
     Create an iterator over a FASTA file or iterable of FASTA entries.
     """

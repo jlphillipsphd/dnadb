@@ -4,10 +4,10 @@ import requests
 from skbio.io.util import open as skbio_open
 import subprocess
 from tqdm.auto import tqdm
-from typing import cast
+from typing import cast, Union
 
 
-def download(url: str, destination: str|Path, chunk_size: int = 1024):
+def download(url: str, destination: Union[str, Path], chunk_size: int = 1024):
     """
     Download a file from the internet to the provided destination.
     """
@@ -29,21 +29,21 @@ def download(url: str, destination: str|Path, chunk_size: int = 1024):
             bar.update(size)
 
 
-def compress(path: str|Path):
+def compress(path: Union[str, Path]):
     """
     Compress the given file with gzip.
     """
     subprocess.run(["gzip", "-f", str(path)])
 
 
-def decompress(path: str|Path):
+def decompress(path: Union[str, Path]):
     """
     Decompress the given file with gunzip.
     """
     subprocess.run(["gunzip", "-f", str(path)])
 
 
-def open_file(path: str|Path, mode: str = "r") -> io.TextIOWrapper:
+def open_file(path: Union[str, Path], mode: str = "r") -> io.TextIOWrapper:
     """
     Open a file wihtout worrying about compression
     """
