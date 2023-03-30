@@ -1,4 +1,4 @@
-from functools import cache, singledispatchmethod
+from functools import singledispatchmethod
 from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
@@ -81,10 +81,10 @@ class FastaDb:
         super().__init__()
         self.path = Path(fasta_db_path).absolute
         self.db = Lmdb.open(str(fasta_db_path))
+        self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
-    @cache
     def __len__(self):
-        return np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+        return self.length
 
     @singledispatchmethod
     def __getitem__(self, sequence_index: int) -> FastaEntry:

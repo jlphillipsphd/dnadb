@@ -1,10 +1,10 @@
-from functools import cache, cached_property
+from functools import cached_property
 import json
 from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
 import re
-from typing import Generator, Iterable, List, TextIO, Tuple, TypedDict, Union
+from typing import Dict, Generator, Iterable, List, Optional, TextIO, Tuple, TypedDict, Set, Union
 
 from .db import DbFactory
 from .utils import open_file
@@ -12,9 +12,7 @@ from .utils import open_file
 TAXON_PREFIXES = "kpcofgs"
 
 class TaxonHierarchyJson(TypedDict):
-    taxon_values: List[List[str]]
-    children: dict[str, List[str]]
-    parents: dict[str, str]
+    parent_map: List[Dict[str, str]]
 
 # Utility Functions --------------------------------------------------------------------------------
 
@@ -47,7 +45,7 @@ def unique_labels(entries: Iterable["TaxonomyEntry"]) -> Generator[str, None, No
         yield entry.label
 
 
-def unique_taxons(entries: Iterable["TaxonomyEntry"], depth: int = 7) -> List[set[str]]:
+def unique_taxons(entries: Iterable["TaxonomyEntry"], depth: int = 7) -> List[Set[str]]:
     """
     Pull each taxon as a set
     """
@@ -59,14 +57,69 @@ def unique_taxons(entries: Iterable["TaxonomyEntry"], depth: int = 7) -> List[se
 
 # Taxonomy TSV Utilities ---------------------------------------------------------------------------
 
+class Taxon:
+    def __init__(self, name: str, parent: Optional["Taxon"] = None):
+        self.depth = (parent.depth + 1) if parent is not None else 0
+        self.name = name
+        self.parent = parent
+        self.children: Set[Taxon] = set([])
+        if self.parent:
+            self.parent.children.add(self)
+
+    def resolve(self, depth: Optional[int] = None) -> Tuple[str, ...]:
+        taxon = self
+        taxon_list: List[str] = []
+        while taxon is not None:
+            taxon_list.append(taxon.name)
+            taxon = taxon.parent
+        taxons: Tuple[str, ...] = tuple(reversed(taxon_list))
+        if depth is not None:
+            taxons = taxons[:depth] + ('',)*max(depth - len(taxons), 0)
+        return taxons
+
+    def __hash__(self):
+        return hash((self.depth, self.name.casefold()))
+
+    def __lt__(self, other: "Taxon"):
+        if self.depth < other.depth:
+            return True
+        return self.depth == other.depth and self.name.casefold() < other.name.casefold()
+
+    def __gt__(self, other: "Taxon"):
+        if self.depth > other.depth:
+            return True
+        return self.depth == other.depth and self.name.casefold() > other.name.casefold()
+
+    def __le__(self, other: "Taxon"):
+        if self.depth < other.depth:
+            return True
+        return self.depth == other.depth and self.name.casefold() <= other.name.casefold()
+
+    def __ge__(self, other: "Taxon"):
+        if self.depth > other.depth:
+            return True
+        return self.depth == other.depth and self.name.casefold() >= other.name.casefold()
+
+    def __eq__(self, other: "Taxon"):
+        return self.depth == other.depth and self.name.casefold() == other.name.casefold()
+
+    def __str__(self):
+        return join_taxonomy(self.resolve(), self.depth + 1)
+
+    def __repr__(self):
+        return str(self)
+
 class TaxonomyHierarchy:
     @classmethod
     def deserialize(cls, taxonomy_hierarchy: bytes) -> "TaxonomyHierarchy":
         hierarchy_json: TaxonHierarchyJson = json.loads(taxonomy_hierarchy.decode())
-        hierarchy = TaxonomyHierarchy(len(hierarchy_json["taxon_values"]))
-        hierarchy.taxon_values = hierarchy_json["taxon_values"]
-        hierarchy.children.update({t: set(c) for t, c in hierarchy_json["children"].items()})
-        hierarchy.parents = hierarchy_json["parents"]
+        hierarchy = TaxonomyHierarchy(len(hierarchy_json["parent_map"]))
+        for i in range(len(hierarchy.taxon_maps)):
+            taxon_map = hierarchy.taxon_maps[i]
+            parent_map = hierarchy_json["parent_map"][i]
+            for child, parent_name in parent_map.items():
+                parent = hierarchy.taxon_maps[i-1][parent_name] if i > 0 else None
+                taxon_map[child] = Taxon(child, parent)
         return hierarchy
 
     @classmethod
@@ -93,38 +146,40 @@ class TaxonomyHierarchy:
                 f"Using depth: {depth}."
             )
         merged_hierarchy = TaxonomyHierarchy(depth)
-        for hierarchy in hierarchy_list:
+        for other_hierarchy in hierarchy_list:
             for i in range(depth):
-                for taxon in hierarchy.taxon_values[i]:
-                    if taxon not in merged_hierarchy.children:
-                        merged_hierarchy.taxon_values[i].append(taxon)
-                        merged_hierarchy.children[taxon] = set()
-                    merged_hierarchy.children[taxon].update(hierarchy.children[taxon])
+                to_map = merged_hierarchy.taxon_maps[i]
+                from_map = other_hierarchy.taxon_maps[i]
+                for taxon in from_map.values():
+                    if i > 0 and taxon.parent is not None:
+                        parent = merged_hierarchy.taxon_maps[i-1][taxon.parent.name]
+                    else:
+                        parent = None
+                    to_map[taxon.name] = Taxon(taxon.name, parent)
         return merged_hierarchy
 
     def __init__(self, depth: int = 7):
-        self.taxon_values: List[List[str]] = [[] for _ in range(depth)]
-        self.children: dict[str, set[str]] = {}
-        self.parents: dict[str, str] = {}
+        self.taxon_maps: List[Dict[str, Taxon]] = [{} for _ in range(depth)] # taxon -> parent
 
     def add_entry(self, entry: "TaxonomyEntry"):
         self.add_taxons(entry.taxons(self.depth))
 
+    def add_taxonomy(self, entry: str):
+        self.add_taxons(split_taxonomy(entry))
+
     def add_taxons(self, taxons: Tuple[str, ...]):
-        parent = ""
-        for taxon_level, taxon in zip(self.taxon_values, taxons):
-            if taxon not in self.children:
-                taxon_level.append(taxon)
-                self.children[taxon] = set()
-            if parent != "":
-                self.children[parent].add(taxon)
-                self.parents[taxon] = parent
-            parent = taxon
+        parent: Optional[Taxon] = None
+        for taxon_map, taxon_name in zip(self.taxon_maps, taxons):
+            if taxon_name not in taxon_map:
+                taxon_map[taxon_name] = Taxon(taxon_name, parent)
+            parent = taxon_map[taxon_name]
 
     def is_valid(self, taxons: Union[str, Tuple[str, ...]]) -> bool:
         taxon_list = split_taxonomy(taxons) if isinstance(taxons, str) else taxons
-        for taxon in taxon_list:
-            if taxon not in self.children:
+        for taxon_map, taxon in zip(self.taxon_maps, taxon_list):
+            if len(taxon) == 0:
+                break
+            if taxon not in taxon_map:
                 return False
         return True
 
@@ -140,37 +195,41 @@ class TaxonomyHierarchy:
         Reduce the provided taxons to a valid taxonomy in this hierarchy.
         """
         reduced_taxons: List[str] = [""]*len(taxons)
-        for i, taxon in enumerate(taxons):
-            if taxon not in self.children:
+        for i, (taxon_map, taxon) in enumerate(zip(self.taxon_maps, taxons)):
+            if taxon not in taxon_map:
                 break
             reduced_taxons[i] = taxon
         return tuple(reduced_taxons)
 
-    def taxonomy(self, taxon: str) -> str:
-        return join_taxonomy(self.taxons(taxon), len(self.taxon_values))
+    def taxonomy(self, depth: int, taxon: str) -> str:
+        return join_taxonomy(self.taxons(depth, taxon), len(self.taxon_maps))
 
-    def taxons(self, taxon: str) -> Tuple[str, ...]:
-        values = [taxon]
-        while taxon in self.parents:
-            taxon = self.parents[taxon]
-            values.append(taxon)
-        padding = ('0',)*(len(self.taxon_values) - len(values))
-        return tuple(reversed(values)) + padding
+    def taxons(self, depth: int, taxon: str) -> Tuple[str, ...]:
+        return self.taxon_maps[depth][taxon].resolve(len(self.taxon_maps))
+
+    def leaves(self):
+        def find_leaves(node: Taxon):
+            result = []
+            for child in node.children:
+                if len(child.children) == 0:
+                    result.append(child)
+                    continue
+                result += find_leaves(child)
+            return result
+        return [leaf for taxon in self.taxon_maps[0].values() for leaf in find_leaves(taxon)]
 
     def serialize(self) -> bytes:
         json_hierarchy: TaxonHierarchyJson = {
-            "taxon_values": self.taxon_values,
-            "children": {taxon: list(children) for taxon, children in self.children.items()},
-            "parents": self.parents
+            "parent_map": [
+                {taxon.name: taxon.parent.name if taxon.parent else "" for taxon in m.values()}
+                for m in self.taxon_maps
+            ]
         }
         return json.dumps(json_hierarchy, separators=(',', ':')).encode()
 
-    def __getitem__(self, key: str) -> set[str]:
-        return self.children[key]
-
     @property
     def depth(self):
-        return len(self.taxon_values)
+        return len(self.taxon_maps)
 
 
 class TaxonomyEntry:
@@ -235,10 +294,10 @@ class TaxonomyDb:
     def __init__(self, taxonomy_db_path: Union[str, Path]):
         self.path = Path(taxonomy_db_path).absolute
         self.db = Lmdb.open(str(taxonomy_db_path))
+        self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
-    @cache
     def __len__(self):
-        return np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+        return self.length
 
     @cached_property
     def hierarchy(self):

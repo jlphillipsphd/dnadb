@@ -1,4 +1,3 @@
-from functools import cache
 from lmdbm import Lmdb
 import numpy as np
 import numpy.typing as npt
@@ -158,10 +157,10 @@ class FastqDb:
     def __init__(self, fastq_db_path: Union[str, Path]):
         self.path = Path(fastq_db_path).absolute
         self.db = Lmdb.open(str(fastq_db_path))
+        self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
-    @cache
     def __len__(self):
-        return np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+        return self.length
 
     def __getitem__(self, sequence_index: int) -> FastqEntry:
         return FastqEntry.deserialize(self.db[str(sequence_index)])
