@@ -62,6 +62,26 @@ def decode_kmers(
     return np.concatenate([sequences // kernel[0], edge], axis=-1).astype(np.uint8)
 
 
+def replace_incomplete_base(base: np.uint8, rng: np.random.Generator = np.random.default_rng()):
+    """
+    Replace an encoded base with a random (likely) base in its place.
+    """
+    return rng.choice(ENC_INCOMPLETE_BASE_MAP[base])
+
+
+def replace_incomplete_bases(
+    sequences: npt.NDArray[np.uint8],
+    rng: np.random.Generator = np.random.default_rng()
+) -> npt.NDArray[np.uint8]:
+    """
+    Replace the incomplete bases with a random (likely) base in its place given encoded sequences.
+    """
+    sequences = sequences.copy()
+    indices = np.where(sequences >= 4)
+    sequences[indices] = [replace_incomplete_base(b, rng) for b in sequences[indices]]
+    return sequences
+
+
 def to_rna(dna_sequence: str) -> str:
     """
     Convert an RNA sequence to DNA.
