@@ -1,3 +1,4 @@
+import abc
 from functools import singledispatchmethod
 from lmdbm import Lmdb
 import numpy as np
@@ -9,13 +10,15 @@ from .taxonomy import TaxonomyEntry
 from .utils import open_file
 
 class FastaEntry:
-
+    """
+    A container class to represent a FASTA entry
+    """
     @classmethod
     def deserialize(cls, entry: bytes) -> "FastaEntry":
         """
         Deserialize a FASTA entry from a byte string
         """
-        return cls.from_str(entry.decode())
+        return cls(*entry.decode().split('\x00'))
 
     @classmethod
     def from_str(cls, entry: str) -> "FastaEntry":
@@ -29,16 +32,13 @@ class FastaEntry:
         sequence = "".join(sequence_parts)
         return cls(identifier, sequence, extra)
 
-    """
-    A container class to represent a FASTA entry
-    """
     def __init__(self, identifier: str, sequence: str, extra: str = ""):
         self.identifier = identifier
         self.sequence = sequence
         self.extra = extra
 
     def serialize(self) -> bytes:
-        return str(self).encode()
+        return "\x00".join((self.identifier, self.sequence, self.extra)).encode()
 
     def __str__(self):
         header_line = f"{self.identifier} {self.extra}".rstrip()
@@ -55,6 +55,7 @@ class FastaDbFactory(DbFactory):
     def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         super().__init__(path, chunk_size)
         self.num_entries = np.int32(0)
+        self.has_ambiguous_bases = False
 
     def write_entry(self, entry: FastaEntry):
         """

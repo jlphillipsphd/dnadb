@@ -102,25 +102,29 @@ class FastqEntry:
     """
     @classmethod
     def deserialize(cls, entry: bytes) -> "FastqEntry":
-        return cls.from_str(entry.decode())
+        return cls(*entry.decode().split('\x00'))
 
     @classmethod
     def from_str(cls, entry: str) -> "FastqEntry":
         header, sequence, _, quality_scores= entry.rstrip().split('\n')
-        return FastqEntry(FastqHeader.from_str(header), sequence, quality_scores)
+        return FastqEntry(header, sequence, quality_scores)
 
     def __init__(
         self,
-        header: FastqHeader,
+        header: str,
         sequence: str,
         quality_scores: str,
     ):
-        self.header = header
+        self.__header = header
         self.sequence = sequence.strip()
         self.quality_scores = quality_scores.strip()
 
     def serialize(self) -> bytes:
-        return str(self).encode()
+        return '\x00'.join((self.__header, self.sequence, self.quality_scores)).encode()
+
+    @property
+    def header(self):
+        return FastqHeader.from_str(self.__header)
 
     def __str__(self):
         return f"{self.header}\n{self.sequence}\n+\n{self.quality_scores}"
