@@ -8,7 +8,7 @@ class DbFactory:
     """
     def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         self.path = Path(path)
-        self.db = Lmdb.open(str(path), "n")
+        self.db = Lmdb.open(str(path), "n", lock=True)
         self.buffer: dict[Union[str, bytes], bytes] = {}
         self.chunk_size = chunk_size
 

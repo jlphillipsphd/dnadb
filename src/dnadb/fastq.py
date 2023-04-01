@@ -156,7 +156,7 @@ class FastqDbFactory(DbFactory):
 class FastqDb:
     def __init__(self, fastq_db_path: Union[str, Path]):
         self.path = Path(fastq_db_path).absolute
-        self.db = Lmdb.open(str(fastq_db_path))
+        self.db = Lmdb.open(str(fastq_db_path), lock=False)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
     def __len__(self):

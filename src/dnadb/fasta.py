@@ -80,7 +80,7 @@ class FastaDb:
     def __init__(self, fasta_db_path: Union[str, Path]):
         super().__init__()
         self.path = Path(fasta_db_path).absolute
-        self.db = Lmdb.open(str(fasta_db_path))
+        self.db = Lmdb.open(str(fasta_db_path), lock=False)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
     def __len__(self):
