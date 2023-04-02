@@ -20,7 +20,7 @@ def split_taxonomy(taxonomy: str, max_depth: int = 7) -> Tuple[str, ...]:
     """
     Split taxonomy label into a tuple
     """
-    return tuple(re.findall(r"\w__([^;]+)", taxonomy))[:max_depth]
+    return tuple(re.findall(r"\w__([^;]*)", taxonomy))[:max_depth]
 
 
 def join_taxonomy(taxonomy: Union[Tuple[str], List[str]], depth: int = 7) -> str:
@@ -108,6 +108,47 @@ class Taxon:
 
     def __repr__(self):
         return str(self)
+
+
+class TaxonomyIdentifierMap:
+    def __init__(self, taxons: Iterable[Iterable[str]]):
+        self.taxon_identifiers: List[Dict[str, int]] = []
+        self.taxon_labels: List[Dict[int, str]] = []
+        for i, taxon_group in enumerate(taxons):
+            self.taxon_identifiers.append({v: i for i, v in enumerate(sorted(taxon_group))})
+            self.taxon_identifiers[-1][""] = -1
+            self.taxon_labels.append({v: k for k, v in self.taxon_identifiers[i].items()})
+
+    def encode(self, taxons: Tuple[str, ...]) -> Tuple[int, ...]:
+        """
+        Encode the taxon strings into integer identifiers.
+        """
+        return tuple(self.taxon_identifiers[i][taxon] for i, taxon in enumerate(taxons))
+
+    def decode(self, taxons: Tuple[int, ...]) -> Tuple[str, ...]:
+        """
+        Decode the taxon integer identifiers into their corresponding string labels.
+        """
+        return tuple(self.taxon_labels[i][taxon] for i, taxon in enumerate(taxons))
+
+    def encode_label(self, taxonomy: str) -> Tuple[int, ...]:
+        """
+        Encode a taxonomy label into integer identifiers.
+        """
+        return self.encode(split_taxonomy(taxonomy, len(self.taxon_identifiers)))
+
+    def decode_label(self, taxonomy: Tuple[int, ...]) -> str:
+        """
+        Decode a taxonomy label from integer identifiers into their corresponding string labels.
+        """
+        return join_taxonomy(self.decode(taxonomy), len(self.taxon_identifiers))
+
+    def encode_entry(self, taxonomy_entry: "TaxonomyEntry") -> Tuple[int, ...]:
+        """
+        Encode a taxonomy entry into integer identifiers.
+        """
+        return self.encode(taxonomy_entry.taxons(len(self.taxon_identifiers)))
+
 
 class TaxonomyHierarchy:
     @classmethod
@@ -201,11 +242,13 @@ class TaxonomyHierarchy:
             reduced_taxons[i] = taxon
         return tuple(reduced_taxons)
 
-    def taxonomy(self, depth: int, taxon: str) -> str:
-        return join_taxonomy(self.taxons(depth, taxon), len(self.taxon_maps))
+    # def taxonomy(self, depth: int, taxon: str) -> str:
+    #     return join_taxonomy(self.taxons(depth, taxon), len(self.taxon_maps))
 
-    def taxons(self, depth: int, taxon: str) -> Tuple[str, ...]:
-        return self.taxon_maps[depth][taxon].resolve(len(self.taxon_maps))
+    # def taxons(self, depth: int, taxon: str) -> Tuple[str, ...]:
+    #     return self.taxon_maps[depth][taxon].resolve(len(self.taxon_maps))
+
+    # def taxon_identifiers(self, )
 
     def leaves(self):
         def find_leaves(node: Taxon):
@@ -230,6 +273,21 @@ class TaxonomyHierarchy:
     @property
     def depth(self):
         return len(self.taxon_maps)
+
+    @depth.setter
+    def depth(self, depth: int):
+        assert depth >= 1
+        if depth >= self.depth:
+            for i in range(self.depth, depth):
+                self.taxon_maps.append({})
+            return
+        for taxon in self.taxon_maps[ - 1].values():
+            taxon.children.clear()
+        self.taxon_maps = self.taxon_maps[:depth]
+
+    @cached_property
+    def identifier_map(self) -> TaxonomyIdentifierMap:
+        return TaxonomyIdentifierMap(((taxon for taxon in m) for m in self.taxon_maps))
 
 
 class TaxonomyEntry:
