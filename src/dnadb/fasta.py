@@ -1,4 +1,3 @@
-import abc
 from functools import singledispatchmethod
 from lmdbm import Lmdb
 import numpy as np
