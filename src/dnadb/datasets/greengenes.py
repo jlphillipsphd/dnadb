@@ -1,6 +1,6 @@
 from functools import cached_property
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 from .dataset import VersionedDataset, RemoteDatasetMixin, InterfacesWithFasta, \
     InterfacesWithTaxonomy
@@ -26,7 +26,7 @@ class Greengenes(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Inte
         return self.NAME
 
     @property
-    def remote_files(self) -> list[Path]:
+    def remote_files(self) -> List[Path]:
         return [self.fasta_file, self.taxonomy_file]
 
     @cached_property
