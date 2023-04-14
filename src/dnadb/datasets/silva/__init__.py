@@ -53,7 +53,8 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
 
     def __build_dna_fasta(self):
         print("Converting FASTA to DNA...")
-        fasta_path = str(self.path / self.fasta_file)[:-3] # remove .gz extension
+        fasta_path = Path((self.path / self.fasta_file).stem) # remove .gz extension
+        fasta_path.parent.mkdir(exist_ok=True)
 
         def map_to_dna(entry: fasta.FastaEntry) -> fasta.FastaEntry:
             entry.sequence = to_dna(entry.sequence)
@@ -68,9 +69,8 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
 
     def __build_taxonomy_map(self):
         print("Building taxonomy map...")
-
-        taxonomy_file_path = str(self.path / self.taxonomy_file)[:-3] # remove .gz extension
-        Path(taxonomy_file_path).parent.mkdir(exist_ok=True)
+        taxonomy_file_path = Path((self.path / self.taxonomy_file).stem) # remove .gz extension
+        taxonomy_file_path.parent.mkdir(exist_ok=True)
 
         input_taxonomy = open_file(self.path / self.__taxonomy_file, 'r')
         input_taxonomy_tree = open_file(self.path / self.__taxonomy_tree_file, 'r')
