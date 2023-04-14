@@ -9,7 +9,8 @@ from typing import Dict, Generator, Iterable, List, Optional, TextIO, Tuple, Typ
 from .db import DbFactory
 from .utils import open_file
 
-TAXON_PREFIXES = "kpcofgs"
+TAXON_LEVEL_NAMES = ("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+TAXON_PREFIXES = ''.join(name[0] for name in TAXON_LEVEL_NAMES).lower()
 
 class TaxonHierarchyJson(TypedDict):
     parent_map: List[Dict[str, str]]
