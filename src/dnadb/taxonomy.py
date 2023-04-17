@@ -13,6 +13,7 @@ TAXON_LEVEL_NAMES = ("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "
 TAXON_PREFIXES = ''.join(name[0] for name in TAXON_LEVEL_NAMES).lower()
 
 class TaxonHierarchyJson(TypedDict):
+    max_depth: int
     parent_map: List[Dict[str, str]]
 
 # Utility Functions --------------------------------------------------------------------------------
@@ -154,8 +155,12 @@ class TaxonomyIdentifierMap:
 class TaxonomyHierarchy:
     @classmethod
     def deserialize(cls, taxonomy_hierarchy: bytes) -> "TaxonomyHierarchy":
-        hierarchy_json: TaxonHierarchyJson = json.loads(taxonomy_hierarchy.decode())
-        hierarchy = TaxonomyHierarchy(len(hierarchy_json["parent_map"]))
+        return cls.from_json(json.loads(taxonomy_hierarchy.decode()))
+
+    @classmethod
+    def from_json(cls, hierarchy_json: TaxonHierarchyJson) -> "TaxonomyHierarchy":
+        hierarchy = TaxonomyHierarchy(hierarchy_json["max_depth"])
+        hierarchy.depth = len(hierarchy_json["parent_map"])
         for i in range(len(hierarchy.taxon_maps)):
             taxon_map = hierarchy.taxon_maps[i]
             parent_map = hierarchy_json["parent_map"][i]
@@ -181,18 +186,22 @@ class TaxonomyHierarchy:
     @classmethod
     def merge(cls, hierarchies: Iterable["TaxonomyHierarchy"]) -> "TaxonomyHierarchy":
         hierarchy_list = list(hierarchies)
-        depth = min(hierarchy.depth for hierarchy in hierarchy_list)
-        if any(hierarchy.depth > depth for hierarchy in hierarchy_list):
+        max_depth = min(hierarchy.max_depth for hierarchy in hierarchy_list)
+        if any(hierarchy.depth > max_depth for hierarchy in hierarchy_list):
             print(
-                "Warning: Merging taxonomy hierarchies with different depths.",
-                f"Using depth: {depth}."
+                "Warning: Merging taxonomy hierarchies with different maximum depths.",
+                f"Using depth: {max_depth}."
             )
-        merged_hierarchy = TaxonomyHierarchy(depth)
+        merged_hierarchy = TaxonomyHierarchy(max_depth)
+        # Largest depth smaller than the maximum depth, or the maximum depth if no such depth exists
+        merged_hierarchy.depth = min(max(h.depth for h in hierarchy_list), max_depth)
         for other_hierarchy in hierarchy_list:
-            for i in range(depth):
+            for i in range(min(other_hierarchy.depth, merged_hierarchy.depth)):
                 to_map = merged_hierarchy.taxon_maps[i]
                 from_map = other_hierarchy.taxon_maps[i]
                 for taxon in from_map.values():
+                    if taxon.name in to_map:
+                        continue
                     if i > 0 and taxon.parent is not None:
                         parent = merged_hierarchy.taxon_maps[i-1][taxon.parent.name]
                     else:
@@ -200,17 +209,21 @@ class TaxonomyHierarchy:
                     to_map[taxon.name] = Taxon(taxon.name, parent)
         return merged_hierarchy
 
-    def __init__(self, depth: int = 7):
-        self.taxon_maps: List[Dict[str, Taxon]] = [{} for _ in range(depth)] # taxon -> parent
+    def __init__(self, max_depth: int = 7):
+        self.max_depth = max_depth
+        self.taxon_maps: List[Dict[str, Taxon]] = [] # taxon -> parent
 
     def add_entry(self, entry: "TaxonomyEntry"):
-        self.add_taxons(entry.taxons(self.depth))
+        self.add_taxons(entry.taxons(self.max_depth))
 
     def add_taxonomy(self, entry: str):
         self.add_taxons(split_taxonomy(entry))
 
     def add_taxons(self, taxons: Tuple[str, ...]):
         parent: Optional[Taxon] = None
+        taxons = tuple(taxon for taxon in taxons[:self.max_depth] if taxon != "")
+        if len(taxons) > self.depth:
+            self.depth = len(taxons)
         for taxon_map, taxon_name in zip(self.taxon_maps, taxons):
             if taxon_name not in taxon_map:
                 taxon_map[taxon_name] = Taxon(taxon_name, parent)
@@ -263,13 +276,17 @@ class TaxonomyHierarchy:
         return [leaf for taxon in self.taxon_maps[0].values() for leaf in find_leaves(taxon)]
 
     def serialize(self) -> bytes:
-        json_hierarchy: TaxonHierarchyJson = {
+        json_hierarchy = self.to_json()
+        return json.dumps(json_hierarchy, separators=(',', ':')).encode()
+
+    def to_json(self) -> TaxonHierarchyJson:
+        return {
+            "max_depth": self.max_depth,
             "parent_map": [
                 {taxon.name: taxon.parent.name if taxon.parent else "" for taxon in m.values()}
                 for m in self.taxon_maps
             ]
         }
-        return json.dumps(json_hierarchy, separators=(',', ':')).encode()
 
     @property
     def depth(self):
@@ -282,7 +299,7 @@ class TaxonomyHierarchy:
             for i in range(self.depth, depth):
                 self.taxon_maps.append({})
             return
-        for taxon in self.taxon_maps[ - 1].values():
+        for taxon in self.taxon_maps[depth - 1].values():
             taxon.children.clear()
         self.taxon_maps = self.taxon_maps[:depth]
 
@@ -326,9 +343,9 @@ class TaxonomyDbFactory(DbFactory):
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
-    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
+    def __init__(self, path: Union[str, Path], max_depth: int = 7, chunk_size: int = 10000):
         super().__init__(path, chunk_size)
-        self.hierarchy = TaxonomyHierarchy()
+        self.hierarchy = TaxonomyHierarchy(max_depth)
         self.num_entries = np.int32(0)
 
     def write_entry(self, entry: TaxonomyEntry):
