@@ -1,8 +1,9 @@
+import io
 from lmdbm import Lmdb
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
-from typing import Generator, Iterable, TextIO, Tuple, Union
+from typing import Generator, Iterable, Tuple, Union
 
 from .db import DbFactory
 from .utils import open_file
@@ -72,6 +73,18 @@ class FastqHeader:
     def serialize(self) -> bytes:
         return str(self).encode()
 
+    def __eq__(self, other: "FastqHeader"):
+        return self.instrument == other.instrument \
+            and self.run_number == other.run_number \
+            and self.flowcell_id == other.flowcell_id \
+            and self.lane == other.lane \
+            and self.tile == other.tile \
+            and self.pos == other.pos \
+            and self.read_type == other.read_type \
+            and self.is_filtered == other.is_filtered \
+            and self.control_number == other.control_number \
+            and self.sequence_index == other.sequence_index
+
     def __str__(self):
         sequence_id = '@'
         sequence_id += ':'.join(map(str, [
@@ -126,6 +139,11 @@ class FastqEntry:
     def header(self):
         return FastqHeader.from_str(self.__header)
 
+    def __eq__(self, other: "FastqEntry"):
+        return self.header == other.header \
+            and self.sequence == other.sequence \
+            and self.quality_scores == other.quality_scores
+
     def __str__(self):
         return f"{self.header}\n{self.sequence}\n+\n{self.quality_scores}"
 
@@ -152,9 +170,9 @@ class FastqDbFactory(DbFactory):
         for entry in entries:
             self.write_entry(entry)
 
-    def close(self):
+    def before_close(self):
         self.write("length", self.num_entries.tobytes())
-        super().close()
+        super().before_close()
 
 
 class FastqDb:
@@ -170,20 +188,23 @@ class FastqDb:
         return FastqEntry.deserialize(self.db[str(sequence_index)])
 
 
-def entries(sequences: Union[TextIO, Iterable[FastqEntry], str, Path]) -> Iterable[FastqEntry]:
+def entries(
+    sequences: Union[io.TextIOBase, Iterable[FastqEntry], str, Path]
+) -> Iterable[FastqEntry]:
     """
-    Create an iterator over a FASTA file or iterable of FASTA entries.
+    Create an iterator over a FASTQ file or iterable of FASTQ entries.
     """
     if isinstance(sequences, (str, Path)):
         with open_file(sequences, 'r') as buffer:
             yield from read(buffer)
-    elif isinstance(sequences, TextIO):
+    elif isinstance(sequences, io.TextIOBase):
         yield from read(sequences)
     else:
         yield from sequences
+    raise TypeError(f"Unsupported type: {type(sequences)}")
 
 
-def read(buffer: TextIO) -> Generator[FastqEntry, None, None]:
+def read(buffer: io.TextIOBase) -> Generator[FastqEntry, None, None]:
     """
     Read entries from a FASTQ file buffer.
     """
@@ -194,7 +215,7 @@ def read(buffer: TextIO) -> Generator[FastqEntry, None, None]:
         line = buffer.readline()
 
 
-def write(buffer: TextIO, entries: Iterable[FastqEntry]) -> int:
+def write(buffer: io.TextIOBase, entries: Iterable[FastqEntry]) -> int:
     """
     Write entries to a FASTQ file.
     """

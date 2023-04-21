@@ -13,6 +13,7 @@ class DbFactory:
         self.db = Lmdb.open(str(self.path), "n", lock=True)
         self.buffer: dict[Union[str, bytes], bytes] = {}
         self.chunk_size = chunk_size
+        self.is_closed = False
 
     def flush(self):
         self.db.update(self.buffer)
@@ -23,9 +24,15 @@ class DbFactory:
         if len(self.buffer) >= self.chunk_size:
             self.flush()
 
-    def close(self):
+    def before_close(self):
         self.flush()
+
+    def close(self):
+        if self.is_closed:
+            return
+        self.before_close()
         self.db.close()
+        self.is_closed = True
 
     def __enter__(self):
         pass

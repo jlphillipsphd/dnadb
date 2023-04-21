@@ -1,10 +1,11 @@
 from functools import cached_property
+import io
 import json
 from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
 import re
-from typing import Dict, Generator, Iterable, List, Optional, TextIO, Tuple, TypedDict, Set, Union
+from typing import Dict, Generator, Iterable, List, Optional, Tuple, TypedDict, Set, Union
 
 from .db import DbFactory
 from .utils import open_file
@@ -322,7 +323,7 @@ class TaxonomyEntry:
         identifier, taxonomy = entry.rstrip().split('\t')
         return cls(identifier, taxonomy)
 
-    def __init__(self, identifier, label):
+    def __init__(self, identifier: str, label: str):
         self.identifier = identifier
         self.label = label
 
@@ -331,6 +332,10 @@ class TaxonomyEntry:
 
     def serialize(self) -> bytes:
         return str(self).encode()
+
+    def __eq__(self, other: "TaxonomyEntry"):
+        return self.identifier == other.identifier \
+            and self.label == other.label
 
     def __repr__(self):
         return str(self)
@@ -360,10 +365,10 @@ class TaxonomyDbFactory(DbFactory):
         for entry in entries:
             self.write_entry(entry)
 
-    def close(self):
+    def before_close(self):
         self.write("hierarchy", self.hierarchy.serialize())
         self.write("length", self.num_entries.tobytes())
-        super().close()
+        super().before_close()
 
 
 class TaxonomyDb:
@@ -383,20 +388,22 @@ class TaxonomyDb:
         return TaxonomyEntry.deserialize(self.db[sequence_id])
 
 
-def entries(taxonomy: Union[TextIO, Iterable[TaxonomyEntry], str, Path]) -> Iterable[TaxonomyEntry]:
+def entries(
+    taxonomy: Union[io.TextIOBase, Iterable[TaxonomyEntry], str, Path]
+) -> Iterable[TaxonomyEntry]:
     """
     Create an iterator over a taxonomy file or iterable of taxonomy entries.
     """
     if isinstance(taxonomy, (str, Path)):
         with open_file(taxonomy, 'r') as buffer:
             yield from read(buffer)
-    elif isinstance(taxonomy, TextIO):
+    elif isinstance(taxonomy, io.TextIOBase):
         yield from read(taxonomy)
     else:
         yield from taxonomy
 
 
-def read(buffer: TextIO) -> Generator[TaxonomyEntry, None, None]:
+def read(buffer: io.TextIOBase) -> Generator[TaxonomyEntry, None, None]:
     """
     Read taxonomies from a tab-separated file (TSV)
     """
@@ -405,7 +412,7 @@ def read(buffer: TextIO) -> Generator[TaxonomyEntry, None, None]:
         yield TaxonomyEntry(identifier, taxonomy)
 
 
-def write(buffer: TextIO, entries: Iterable[TaxonomyEntry]):
+def write(buffer: io.TextIOBase, entries: Iterable[TaxonomyEntry]):
     """
     Write taxonomy entries to a tab-separate file (TSV)
     """

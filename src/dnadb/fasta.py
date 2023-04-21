@@ -1,8 +1,9 @@
 from functools import singledispatchmethod
+import io
 from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
-from typing import Generator, Iterable, TextIO, Tuple, Union
+from typing import Generator, Iterable, Tuple, Union
 
 from .db import DbFactory
 from .taxonomy import TaxonomyEntry
@@ -43,6 +44,11 @@ class FastaEntry:
         header_line = f"{self.identifier} {self.extra}".rstrip()
         return f">{header_line}\n{self.sequence}"
 
+    def __eq__(self, other):
+        return self.identifier == other.identifier \
+            and self.sequence == other.sequence \
+            and self.extra == other.extra
+
     def __repr__(self):
         return str(self)
 
@@ -68,9 +74,9 @@ class FastaDbFactory(DbFactory):
         for entry in entries:
             self.write_entry(entry)
 
-    def close(self):
+    def before_close(self):
         self.write("length", self.num_entries.tobytes())
-        super().close()
+        super().before_close()
 
 
 class FastaDb:
@@ -96,14 +102,16 @@ class FastaDb:
         return self[index]
 
 
-def entries(sequences: Union[TextIO, Iterable[FastaEntry], str, Path]) -> Iterable[FastaEntry]:
+def entries(
+    sequences: Union[io.TextIOBase, Iterable[FastaEntry], str, Path]
+) -> Iterable[FastaEntry]:
     """
     Create an iterator over a FASTA file or iterable of FASTA entries.
     """
     if isinstance(sequences, (str, Path)):
         with open_file(sequences, 'r') as buffer:
             yield from read(buffer)
-    elif isinstance(sequences, TextIO):
+    elif isinstance(sequences, io.TextIOBase):
         yield from read(sequences)
     else:
         yield from sequences
@@ -128,7 +136,7 @@ def entries_with_taxonomy(
         yield sequence, taxonomy
 
 
-def read(buffer: TextIO) -> Generator[FastaEntry, None, None]:
+def read(buffer: io.TextIOBase) -> Generator[FastaEntry, None, None]:
     """
     Read entries from a FASTA file buffer.
     """
@@ -142,7 +150,7 @@ def read(buffer: TextIO) -> Generator[FastaEntry, None, None]:
         yield FastaEntry.from_str(entry_str)
 
 
-def write(buffer: TextIO, entries: Iterable[FastaEntry]) -> int:
+def write(buffer: io.TextIOBase, entries: Iterable[FastaEntry]) -> int:
     """
     Write entries to a FASTA file.
     """
