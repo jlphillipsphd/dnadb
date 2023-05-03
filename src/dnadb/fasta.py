@@ -93,6 +93,22 @@ class FastaDb:
         return self.length
 
     @singledispatchmethod
+    def __contains__(self, sequence_index: int) -> bool:
+        return str(sequence_index) in self.db
+
+    @__contains__.register
+    def _(self, sequence_id: str) -> bool:
+        return f"id_{sequence_id}" in self.db
+
+    @__contains__.register
+    def _(self, entry: FastaEntry) -> bool:
+        return entry.identifier in self
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    @singledispatchmethod
     def __getitem__(self, sequence_index: int) -> FastaEntry:
         return FastaEntry.deserialize(self.db[str(sequence_index)])
 

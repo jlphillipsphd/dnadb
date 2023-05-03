@@ -184,6 +184,13 @@ class FastqDb:
     def __len__(self):
         return self.length
 
+    def __contains__(self, sequence_index: int) -> bool:
+        return str(sequence_index) in self.db
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
     def __getitem__(self, sequence_index: int) -> FastqEntry:
         return FastqEntry.deserialize(self.db[str(sequence_index)])
 

@@ -377,12 +377,21 @@ class TaxonomyDb:
         self.db = Lmdb.open(str(self.path), lock=False)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
-    def __len__(self):
-        return self.length
-
     @cached_property
     def hierarchy(self):
         return TaxonomyHierarchy.deserialize(self.db["hierarchy"])
+
+    def __len__(self):
+        return self.length
+
+    def __contains__(self, sequence_id: str) -> bool:
+        return sequence_id in self.db
+
+    def __iter__(self):
+        for key in self.db.keys():
+            if key in ("length", "hierarchy"):
+                continue
+            yield self[key]
 
     def __getitem__(self, sequence_id: str) -> TaxonomyEntry:
         return TaxonomyEntry.deserialize(self.db[sequence_id])

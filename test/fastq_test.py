@@ -109,6 +109,13 @@ class TestFastaDb(unittest.TestCase):
     def test_length(self):
         self.assertEqual(len(self.db), 2)
 
+    def test_has_sequence_index(self):
+        self.assertIn(0, self.db)
+
+    def test_iter_sequence_entries(self):
+        for entry in self.db:
+            self.assertIn(entry, self.fastq_entries)
+
     def test_get_sequence(self):
         self.assertEqual(self.db[0], self.fastq_entries[0])
         self.assertEqual(self.db[1], self.fastq_entries[1])
