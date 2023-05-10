@@ -38,7 +38,6 @@ ENC_AMBIGUOUS_BASE_MAP = {BASE_LOOKUP_TABLE[ord(b) - 65]: tuple(BASE_LOOKUP_TABL
 
 # DNA Sequence Encoding/Decoding -------------------------------------------------------------------
 
-
 def encode(ascii_bases: npt.NDArray[np.uint8]) ->  npt.NDArray[np.uint8]:
     """
     Encode the given DNA bases in ASCII form into an integer vector representation.
@@ -133,52 +132,3 @@ def to_dna(rna_sequence: str) -> str:
     Convert a DNA sequence to RNA.
     """
     return rna_sequence.replace('U', 'T')
-
-# Containers ---------------------------------------------------------------------------------------
-
-class DnaSequence(abc.ABC):
-    """
-    A container for a DNA sequence.
-    """
-    @property
-    @abc.abstractmethod
-    def encoded(self) -> npt.NDArray[np.uint8]:
-        raise NotImplementedError()
-
-    def __bytes__(self):
-        return self.encoded.tobytes()
-
-    @abc.abstractmethod
-    def __str__(self):
-        raise NotImplementedError()
-
-    def __repr__(self):
-        return str(self)
-
-class DecodedDnaSequence(DnaSequence):
-    """
-    A container class for a raw DNA sequence string.
-    """
-    def __init__(self, sequence: str):
-        self.__sequence = sequence
-
-    @property
-    def encoded(self) -> npt.NDArray[np.uint8]:
-        return encode_sequence(str(self))
-
-    def __str__(self):
-        return self.__sequence
-
-class EncodedDnaSequence(DnaSequence):
-    """
-    A container class for an encoded DNA sequence.
-    """
-    def __init__(self, sequence: npt.NDArray[np.uint8]):
-        self.__sequence = sequence
-
-    @property
-    def encoded(self) -> npt.NDArray[np.uint8]:
-        return self.__sequence
-
-    def __str__(self):
-        return decode_sequence(self.__sequence)
