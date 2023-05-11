@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import io
 from lmdbm import Lmdb
 import numpy as np
@@ -5,7 +6,7 @@ import numpy.typing as npt
 from pathlib import Path
 from typing import Generator, Iterable, Tuple, Union
 
-from .db import DbFactory
+from .db import DbFactory, DbWrapper
 from .utils import open_file
 
 def phred_encode(probabilities: npt.ArrayLike, encoding: int = 33) -> str:
@@ -18,10 +19,35 @@ def phred_decode(qualities: str, encoding: int = 33) -> npt.NDArray[np.float64]:
     return 10**(scores / -10)
 
 
+@dataclass(frozen=True, order=True)
 class FastqHeader:
     """
-    A class representation of the sequence identifier of a FASTQ entry.
+    A class representation of the header of a FASTQ entry.
     """
+    __slots__ = (
+        "instrument",
+        "run_number",
+        "flowcell_id",
+        "lane",
+        "tile",
+        "pos",
+        "read_type",
+        "is_filtered",
+        "control_number",
+        "sequence_index"
+    )
+
+    instrument: str
+    run_number: int
+    flowcell_id: str
+    lane: int
+    tile: int
+    pos: Tuple[int, int]
+    read_type: int
+    is_filtered: bool
+    control_number: int
+    sequence_index: str
+
     @classmethod
     def deserialize(cls, sequence_id: bytes):
         return cls.from_str(sequence_id.decode())
@@ -45,45 +71,9 @@ class FastqHeader:
             sequence_index=right[3]
         )
 
-    def __init__(
-        self,
-        instrument: str,
-        run_number: int,
-        flowcell_id: str,
-        lane: int,
-        tile: int,
-        pos: Tuple[int, int],
-        read_type: int,
-        is_filtered: bool,
-        control_number: int,
-        sequence_index: str
-    ):
-        self.instrument = instrument
-        self.run_number = run_number
-        self.flowcell_id = flowcell_id
-        self.lane = lane
-        self.tile = tile
-        self.pos = pos
-        self.read_type = read_type
-        self.is_filtered = is_filtered
-        self.control_number = control_number
-        self.sequence_index = sequence_index
-
     # Serialize a FastqHeader object to a byte string
     def serialize(self) -> bytes:
         return str(self).encode()
-
-    def __eq__(self, other: "FastqHeader"):
-        return self.instrument == other.instrument \
-            and self.run_number == other.run_number \
-            and self.flowcell_id == other.flowcell_id \
-            and self.lane == other.lane \
-            and self.tile == other.tile \
-            and self.pos == other.pos \
-            and self.read_type == other.read_type \
-            and self.is_filtered == other.is_filtered \
-            and self.control_number == other.control_number \
-            and self.sequence_index == other.sequence_index
 
     def __str__(self):
         sequence_id = '@'
@@ -104,15 +94,19 @@ class FastqHeader:
         ]))
         return sequence_id
 
-    def __repr__(self):
-        return str(self)
 
-
+@dataclass(frozen=True, order=True)
 class FastqEntry:
     """
     A class representation of a FASTQ entry containing the sequnce identifier, sequence, and quality
     scores.
     """
+    __slots__ = ("header_str", "sequence", "quality_scores")
+
+    header_str: str
+    sequence: str
+    quality_scores: str
+
     @classmethod
     def deserialize(cls, entry: bytes) -> "FastqEntry":
         return cls(*entry.decode().split('\x00'))
@@ -120,35 +114,17 @@ class FastqEntry:
     @classmethod
     def from_str(cls, entry: str) -> "FastqEntry":
         header, sequence, _, quality_scores= entry.rstrip().split('\n')
-        return FastqEntry(header, sequence, quality_scores)
-
-    def __init__(
-        self,
-        header: str,
-        sequence: str,
-        quality_scores: str,
-    ):
-        self.__header = header
-        self.sequence = sequence.strip()
-        self.quality_scores = quality_scores.strip()
+        return cls(header, sequence, quality_scores)
 
     def serialize(self) -> bytes:
-        return '\x00'.join((self.__header, self.sequence, self.quality_scores)).encode()
+        return '\x00'.join((self.header_str, self.sequence, self.quality_scores)).encode()
 
     @property
     def header(self):
-        return FastqHeader.from_str(self.__header)
-
-    def __eq__(self, other: "FastqEntry"):
-        return self.header == other.header \
-            and self.sequence == other.sequence \
-            and self.quality_scores == other.quality_scores
+        return FastqHeader.from_str(self.header_str)
 
     def __str__(self):
-        return f"{self.header}\n{self.sequence}\n+\n{self.quality_scores}"
-
-    def __repr__(self):
-        return "FastqEntry:\n" + '\n'.join(f"  {s}" for s in str(self).split('\n'))
+        return f"{self.header_str}\n{self.sequence}\n+\n{self.quality_scores}"
 
 
 class FastqDbFactory(DbFactory):
@@ -175,10 +151,9 @@ class FastqDbFactory(DbFactory):
         super().before_close()
 
 
-class FastqDb:
+class FastqDb(DbWrapper):
     def __init__(self, fastq_db_path: Union[str, Path]):
-        self.path = Path(fastq_db_path).absolute()
-        self.db = Lmdb.open(str(self.path), lock=False)
+        super().__init__(fastq_db_path)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
     def __len__(self):

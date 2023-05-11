@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from functools import cached_property
 import io
 import json
@@ -10,12 +11,8 @@ from typing import Dict, Generator, Iterable, List, Optional, Tuple, TypedDict, 
 from .db import DbFactory, DbWrapper
 from .utils import open_file
 
-TAXON_LEVEL_NAMES = ("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
-TAXON_PREFIXES = ''.join(name[0] for name in TAXON_LEVEL_NAMES).lower()
-
-class TaxonHierarchyJson(TypedDict):
-    max_depth: int
-    parent_map: List[Dict[str, str]]
+RANKS = ("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+RANK_PREFIXES = ''.join(rank[0] for rank in RANKS).lower()
 
 # Utility Functions --------------------------------------------------------------------------------
 
@@ -33,11 +30,15 @@ def join_taxonomy(taxonomy: Union[Tuple[str], List[str]], depth: int = 7) -> str
     assert depth >= 1 and depth <= 7
     taxonomy = taxonomy[:depth] # Trim to depth
     taxonomy = tuple(taxonomy) + ("",) * (depth - len(taxonomy))
-    return "; ".join([f"{TAXON_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
+    return "; ".join([f"{RANK_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
 
 # Taxonomy TSV Utilities ---------------------------------------------------------------------------
 
+@dataclass(frozen=True, order=True)
 class TaxonomyEntry:
+    __slots__ = ("identifier", "label")
+    identifier: str
+    label: str
 
     @classmethod
     def deserialize(cls, entry: bytes) -> "TaxonomyEntry":
@@ -48,25 +49,15 @@ class TaxonomyEntry:
         """
         Create a taxonomy entry from a string
         """
+        print("Entry string:", entry)
         identifier, taxonomy = entry.rstrip().split('\t')
         return cls(identifier, taxonomy)
-
-    def __init__(self, identifier: str, label: str):
-        self.identifier = identifier
-        self.label = label
 
     def taxons(self, depth: int = 7) -> Tuple[str, ...]:
         return split_taxonomy(self.label, depth)
 
     def serialize(self) -> bytes:
         return str(self).encode()
-
-    def __eq__(self, other: "TaxonomyEntry"):
-        return self.identifier == other.identifier \
-            and self.label == other.label
-
-    def __repr__(self):
-        return str(self)
 
     def __str__(self):
         return f"{self.identifier}\t{self.label}"
@@ -91,7 +82,7 @@ class TaxonomyDbFactory(DbFactory):
     1 -> 1
     ...
 
-    [label index to fasta ids]
+    [label index to fasta id]
     0_0 -> abc
     0_1 -> def
     1_0 -> efg
@@ -103,6 +94,8 @@ class TaxonomyDbFactory(DbFactory):
     efg -> 1
     ...
     """
+    __slots__ = ("num_entries",)
+
     def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         super().__init__(path, chunk_size)
         self.num_entries = np.int32(0)
@@ -133,6 +126,8 @@ class TaxonomyDbFactory(DbFactory):
 
 
 class TaxonomyDb(DbWrapper):
+    __slots__ = ("length",)
+
     def __init__(self, taxonomy_db_path: Union[str, Path]):
         super().__init__(taxonomy_db_path)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]

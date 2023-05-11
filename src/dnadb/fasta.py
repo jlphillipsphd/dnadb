@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from functools import singledispatchmethod
 import io
 from lmdbm import Lmdb
@@ -5,14 +6,21 @@ import numpy as np
 from pathlib import Path
 from typing import Generator, Iterable, Tuple, Union
 
-from .db import DbFactory
+from .db import DbFactory, DbWrapper
 from .taxonomy import TaxonomyEntry
 from .utils import open_file
 
+@dataclass(frozen=True, order=True)
 class FastaEntry:
     """
     A container class to represent a FASTA entry
     """
+    __slots__ = ("identifier", "sequence", "extra")
+
+    identifier: str
+    sequence: str
+    extra: str
+
     @classmethod
     def deserialize(cls, entry: bytes) -> "FastaEntry":
         """
@@ -32,11 +40,6 @@ class FastaEntry:
         sequence = "".join(sequence_parts)
         return cls(identifier, sequence, extra)
 
-    def __init__(self, identifier: str, sequence: str, extra: str = ""):
-        self.identifier = identifier
-        self.sequence = sequence
-        self.extra = extra
-
     def serialize(self) -> bytes:
         return "\x00".join((self.identifier, self.sequence, self.extra)).encode()
 
@@ -44,19 +47,13 @@ class FastaEntry:
         header_line = f"{self.identifier} {self.extra}".rstrip()
         return f">{header_line}\n{self.sequence}"
 
-    def __eq__(self, other):
-        return self.identifier == other.identifier \
-            and self.sequence == other.sequence \
-            and self.extra == other.extra
-
-    def __repr__(self):
-        return str(self)
-
 
 class FastaDbFactory(DbFactory):
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
+    __slots__ = ("num_entries", "has_ambiguous_bases")
+
     def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
         super().__init__(path, chunk_size)
         self.num_entries = np.int32(0)
@@ -79,14 +76,12 @@ class FastaDbFactory(DbFactory):
         super().before_close()
 
 
-class FastaDb:
+class FastaDb(DbWrapper):
     """
     An LMDB-backed database of FASTA entries.
     """
     def __init__(self, fasta_db_path: Union[str, Path]):
-        super().__init__()
-        self.path = Path(fasta_db_path).absolute()
-        self.db = Lmdb.open(str(self.path), lock=False)
+        super().__init__(fasta_db_path)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
 
     def __len__(self):
