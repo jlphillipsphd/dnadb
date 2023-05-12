@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dnadb"
-version = "0.2.9"
+version = "0.3.0"
 authors = [
   { name="David Ludwig", email="davidludwigii@gmail.com" },
 ]
@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
   "lmdbm-lockable >= 0.0.5",
   "scikit-bio ~= 0.5.8",
+  "sortedcontainers >= 2.4.0"
 ]
 
 [project.urls]

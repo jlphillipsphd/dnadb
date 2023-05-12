@@ -93,7 +93,7 @@ class TestFastqEntry(unittest.TestCase):
         self.assertEqual(fastq_file.getvalue().rstrip(), FASTQ_SAMPLE.rstrip())
 
 
-class TestFastaDb(unittest.TestCase):
+class TestFastqDb(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         fastq_file = io.StringIO(FASTQ_SAMPLE)
