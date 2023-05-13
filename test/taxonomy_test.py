@@ -343,6 +343,9 @@ class TestTaxonomyHierarchy(unittest.TestCase):
     def test_reduce_taxonomy_strict(self):
         self.assertEqual(self.hierarchy.reduce_taxonomy(self.invalid_label, strict=True), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
 
+    def test_tokenize_detokenize(self):
+        for entry in self.taxonomy_entries:
+            self.assertEqual(self.hierarchy.detokenize(self.hierarchy.tokenize(entry.label)), entry.label)
 
 class TestTaxonomyHierarchyMerge(unittest.TestCase):
     def setUp(self):

@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field, replace
 from functools import cached_property
+from itertools import chain
 import io
 import json
 from lmdbm import Lmdb
 import numpy as np
+import numpy.typing as npt
 from pathlib import Path
 import re
 from sortedcontainers import SortedDict
@@ -207,8 +209,8 @@ class Taxon:
     # __slots__ = ("name", "rank", "parent", "children")
     name: str
     rank: int
-    parent: Optional["Taxon"] = field(default=None)
-    children: Dict[str, "Taxon"] = field(default_factory=dict, init=False, repr=False)
+    parent: Optional["Taxon"] = field(default=None, hash=False)
+    children: Dict[str, "Taxon"] = field(default_factory=dict, init=False, hash=False, repr=False)
 
     def __post_init__(self):
         if self.parent is not None:
@@ -264,6 +266,15 @@ class TaxonomyHierarchy:
                 key = key.name
             super().__delitem__(key.casefold())
 
+        def keys(self) -> chain[str]:
+            return super().keys()
+
+        def values(self) -> chain[Taxon]:
+            return super().values()
+
+        def __iter__(self) -> chain[str]:
+            return super().__iter__()
+
     @classmethod
     def merged(
         cls,
@@ -289,6 +300,8 @@ class TaxonomyHierarchy:
     def __init__(self, depth: int):
         self.depth = depth
         self.taxons = tuple(TaxonomyHierarchy.TaxonDict() for _ in range(depth))
+        self.__taxon_to_id_map: Optional[Tuple[Dict[Taxon, int], ...]] = None
+        self.__id_to_taxon_map: Optional[Tuple[Dict[int, Taxon], ...]] = None
 
     def add_entry(self, entry: TaxonomyEntry):
         """
@@ -330,6 +343,7 @@ class TaxonomyHierarchy:
         parent: Optional[Taxon] = None
         for rank, name in enumerate(taxonomy):
             if not self.has_taxon(name, rank):
+                self.__taxon_id_map = None
                 self.taxons[rank].insert(Taxon(name, rank, parent))
             parent = self.taxons[rank][name]
 
@@ -446,6 +460,84 @@ class TaxonomyHierarchy:
             if taxons[i] in self.taxons[i]:
                 return taxons[:i + 1]
         return tuple()
+
+    def tokenize(self, taxonomy: str) -> npt.NDArray[np.int64]:
+        """
+        Tokenize the taxonomy label into a a tuple of taxon integer IDs
+
+        Args:
+            taxonomy (str): The taxonomy label to tokenize (e.g. "k__Bacteria; ...").
+
+        Returns:
+            Tuple[str]: The tokenized taxonomy.
+        """
+        return self.tokenize_taxons(split_taxonomy(taxonomy))
+
+    def tokenize_taxons(self, taxons: Tuple[str, ...]) -> npt.NDArray[np.int64]:
+        """
+        Tokenize the taxonomy tuple into a a tuple of taxon integer IDs
+
+        Args:
+            taxons (Tuple[str]): The taxonomy tuple to tokenize.
+
+        Returns:
+            Tuple[str]: The tokenized taxonomy.
+        """
+        result = np.full(self.depth, -1, np.int64)
+        for rank, taxon in enumerate(taxons):
+            result[rank] = self.taxon_to_id_map[rank][self.taxons[rank][taxon]]
+        return result
+
+    def detokenize(self, taxon_tokens: npt.NDArray[np.int64]) -> str:
+        """
+        Detokenize the taxonomy tokens into a taxonomy label.
+
+        Args:
+            taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
+
+        Returns:
+            str: The detokenized taxonomy label.
+        """
+        return join_taxonomy(self.detokenize_taxons(taxon_tokens))
+
+    def detokenize_taxons(self, taxon_tokens: npt.NDArray[np.int64]) -> Tuple[str, ...]:
+        """
+        Detokenize the taxonomy tokens into a taxonomy tuple.
+
+        Args:
+            taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
+
+        Returns:
+            Tuple[str]: The detokenized taxonomy tuple.
+        """
+        result = tuple()
+        for rank, token in enumerate(taxon_tokens):
+            if token < 0:
+                break
+            result += (self.id_to_taxon_map[rank][token].name,)
+        return result
+
+    @property
+    def taxon_to_id_map(self) -> Tuple[Dict[Taxon, int], ...]:
+        """
+        A mapping of taxon instances to taxon IDs.
+        """
+        if self.__taxon_to_id_map is None:
+            self.__taxon_to_id_map = tuple(
+                {taxon: i for i, taxon in enumerate(taxons.values())}
+                for taxons in self.taxons)
+        return self.__taxon_to_id_map
+
+    @property
+    def id_to_taxon_map(self) -> Tuple[Dict[int, Taxon], ...]:
+        """
+        A mapping of taxon IDs to Taxon instances.
+        """
+        if self.__id_to_taxon_map is None:
+            self.__id_to_taxon_map = tuple(
+                {i: taxon for i, taxon in enumerate(taxons.values())}
+                for taxons in self.taxons)
+        return self.__id_to_taxon_map
 
     def __iter__(self) -> Generator[Taxon, None, None]:
         """
