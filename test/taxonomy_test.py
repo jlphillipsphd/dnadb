@@ -343,9 +343,38 @@ class TestTaxonomyHierarchy(unittest.TestCase):
     def test_reduce_taxonomy_strict(self):
         self.assertEqual(self.hierarchy.reduce_taxonomy(self.invalid_label, strict=True), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
 
-    def test_tokenize_detokenize(self):
+    def test_rebuild_taxon_id_maps_on_add(self):
+        a = self.hierarchy.taxon_to_id_map
+        b = self.hierarchy.id_to_taxon_map
+        self.hierarchy.add_taxonomy(self.invalid_label)
+        self.assertIsNot(self.hierarchy.taxon_to_id_map, a)
+        self.assertIsNot(self.hierarchy.id_to_taxon_map, b)
+
+    def test_prevent_rebuild_taxon_id_maps_on_add(self):
+        a = self.hierarchy.taxon_to_id_map
+        b = self.hierarchy.id_to_taxon_map
+        self.hierarchy.add_entry(self.taxonomy_entries[3])
+        self.assertIs(self.hierarchy.taxon_to_id_map, a)
+        self.assertIs(self.hierarchy.id_to_taxon_map, b)
+
+    def test_tokenize(self):
+        tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label)
+        self.assertEqual(len(tokens), 3)
+
+    def test_tokenize_with_pad(self):
+        tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label, pad=True)
+        self.assertEqual(len(tokens), 7)
+        self.assertEqual(tuple(tokens[3:]), (-1, -1, -1, -1))
+
+    def test_detokenize(self):
         for entry in self.taxonomy_entries:
-            self.assertEqual(self.hierarchy.detokenize(self.hierarchy.tokenize(entry.label)), entry.label)
+            tokens = self.hierarchy.tokenize(entry.label, pad=False)
+            self.assertEqual(self.hierarchy.detokenize(tokens), entry.label)
+
+    def test_detokenize_with_pad(self):
+        for entry in self.taxonomy_entries:
+            tokens = self.hierarchy.tokenize(entry.label, pad=True)
+            self.assertEqual(self.hierarchy.detokenize(tokens), entry.label)
 
 class TestTaxonomyHierarchyMerge(unittest.TestCase):
     def setUp(self):

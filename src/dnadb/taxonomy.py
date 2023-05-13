@@ -343,7 +343,8 @@ class TaxonomyHierarchy:
         parent: Optional[Taxon] = None
         for rank, name in enumerate(taxonomy):
             if not self.has_taxon(name, rank):
-                self.__taxon_id_map = None
+                self.__taxon_to_id_map = None
+                self.__id_to_taxon_map = None
                 self.taxons[rank].insert(Taxon(name, rank, parent))
             parent = self.taxons[rank][name]
 
@@ -432,7 +433,11 @@ class TaxonomyHierarchy:
         """
         ...
 
-    def reduce_taxonomy(self, taxonomy: Union[str, TaxonomyEntry], strict: bool = False) -> Union[str, TaxonomyEntry]:
+    def reduce_taxonomy(
+        self,
+        taxonomy: Union[str, TaxonomyEntry],
+        strict: bool = False
+    ) -> Union[str, TaxonomyEntry]:
         taxonomy_label = taxonomy.label if isinstance(taxonomy, TaxonomyEntry) else taxonomy
         taxons = split_taxonomy(taxonomy_label)
         reduced_taxonomy = join_taxonomy(self.reduce_taxons(taxons, strict))
@@ -461,29 +466,31 @@ class TaxonomyHierarchy:
                 return taxons[:i + 1]
         return tuple()
 
-    def tokenize(self, taxonomy: str) -> npt.NDArray[np.int64]:
+    def tokenize(self, taxonomy: str, pad: bool = False) -> npt.NDArray[np.int64]:
         """
         Tokenize the taxonomy label into a a tuple of taxon integer IDs
 
         Args:
             taxonomy (str): The taxonomy label to tokenize (e.g. "k__Bacteria; ...").
+            pad (bool): Pad the taxonomy with -1s to the depth of the hierarchy. Defaults to False.
 
         Returns:
             Tuple[str]: The tokenized taxonomy.
         """
-        return self.tokenize_taxons(split_taxonomy(taxonomy))
+        return self.tokenize_taxons(split_taxonomy(taxonomy), pad)
 
-    def tokenize_taxons(self, taxons: Tuple[str, ...]) -> npt.NDArray[np.int64]:
+    def tokenize_taxons(self, taxons: Tuple[str, ...], pad: bool = False) -> npt.NDArray[np.int64]:
         """
         Tokenize the taxonomy tuple into a a tuple of taxon integer IDs
 
         Args:
             taxons (Tuple[str]): The taxonomy tuple to tokenize.
+            pad (bool): Pad the taxonomy with -1s to the depth of the hierarchy. Defaults to False.
 
         Returns:
             Tuple[str]: The tokenized taxonomy.
         """
-        result = np.full(self.depth, -1, np.int64)
+        result = np.empty(len(taxons), np.int64) if not pad else np.full(self.depth, -1, np.int64)
         for rank, taxon in enumerate(taxons):
             result[rank] = self.taxon_to_id_map[rank][self.taxons[rank][taxon]]
         return result
