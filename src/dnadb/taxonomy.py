@@ -27,7 +27,7 @@ def split_taxonomy(taxonomy: str) -> Tuple[str, ...]:
     return tuple(re.findall(r"\w__([^;]+)", taxonomy))
 
 
-def join_taxonomy(taxonomy: Union[Tuple[str], List[str]]) -> str:
+def join_taxonomy(taxonomy: Union[Tuple[str, ...], List[str]]) -> str:
     """
     Merge a taxonomy tuple into a string format
     """
@@ -303,15 +303,6 @@ class TaxonomyHierarchy:
         self.__taxon_to_id_map: Optional[Tuple[Dict[Taxon, int], ...]] = None
         self.__id_to_taxon_map: Optional[Tuple[Dict[int, Taxon], ...]] = None
 
-    def add_entry(self, entry: TaxonomyEntry):
-        """
-        Add a taxonomy entry to the hierarchy.
-
-        Args:
-            entry (TaxonomyEntry): The taxonomy entry to add.
-        """
-        self.add_taxonomy(entry.label)
-
     def add_entries(self, entries: Iterable[TaxonomyEntry]):
         """
         Add taxonomy entries to the hierarchy.
@@ -321,6 +312,25 @@ class TaxonomyHierarchy:
         """
         for entry in entries:
             self.add_entry(entry)
+
+    def add_entry(self, entry: TaxonomyEntry):
+        """
+        Add a taxonomy entry to the hierarchy.
+
+        Args:
+            entry (TaxonomyEntry): The taxonomy entry to add.
+        """
+        self.add_taxonomy(entry.label)
+
+    def add_taxonomies(self, taxonomies: Iterable[str]):
+        """
+        Add taxonomy labels to the hierarchy.
+
+        Args:
+            taxonomies (Iterable[str]): The taxonomy labels to add (e.g. "k__Bacteria; ...").
+        """
+        for taxonomy in taxonomies:
+            self.add_taxonomy(taxonomy)
 
     def add_taxonomy(self, taxonomy: str):
         """
@@ -348,6 +358,35 @@ class TaxonomyHierarchy:
                 self.taxons[rank].insert(Taxon(name, rank, parent))
             parent = self.taxons[rank][name]
 
+    def has_entry(self, taxonomy: TaxonomyEntry, strict: bool = False) -> bool:
+        """
+        Check if the hierarchy has the given taxonomy.
+
+        Args:
+            taxonomy (str): The taxonomy label to check (e.g. "k__Bacteria; ...").
+            strict (bool, optional): Ensure every taxon exists. Defaults to False.
+
+        Returns:
+            bool: The hierarchy contains the taxonomy.
+        """
+        return self.has_taxonomy(taxonomy.label, strict)
+
+    def has_taxonomy(self, taxonomy: str, strict: bool = False) -> bool:
+        """
+        Check if the hierarchy has the given taxonomy.
+
+        Args:
+            taxonomy (TaxonomyEntry): The taxonomy to check.
+            strict (bool, optional): Ensure every taxon exists. Defaults to False.
+
+        Returns:
+            bool: The hierarchy contains the taxonomy.
+        """
+        if isinstance(taxonomy, TaxonomyEntry):
+            taxonomy = taxonomy.label
+        taxons = split_taxonomy(taxonomy)
+        return self.has_taxons(taxons, strict)
+
     def has_taxon(self, taxon: str, rank: int) -> bool:
         """
         Check if the given taxon is present within the hierarchy.
@@ -361,7 +400,7 @@ class TaxonomyHierarchy:
         """
         return (rank < self.depth) and taxon.casefold() in self.taxons[rank]
 
-    def has_taxons(self, taxons: Tuple[str], strict: bool = False) -> bool:
+    def has_taxons(self, taxons: Tuple[str, ...], strict: bool = False) -> bool:
         """
         Check if the hierarchy has a list of taxons.
 
@@ -371,41 +410,19 @@ class TaxonomyHierarchy:
             return self.has_taxon(taxons[-1], len(taxons) - 1)
         return all(taxon.casefold() in self.taxons[rank] for rank, taxon in enumerate(taxons))
 
-    @overload
-    def has_taxonomy(self, taxonomy: TaxonomyEntry, strict: bool = False) -> bool:
+    def reduce_entry(self, taxonomy: TaxonomyEntry, strict: bool = False) -> TaxonomyEntry:
         """
-        Check if the hierarchy has the given taxonomy.
+        Reduce the taxonomy to a valid known taxonomy label in the hierarchy.
 
         Args:
-            taxonomy (str): The taxonomy label to check (e.g. "k__Bacteria; ...").
+            taxonomy (TaxonomyEntry): The taxonomy entry to reduce.
             strict (bool, optional): Ensure every taxon exists. Defaults to False.
 
         Returns:
-            bool: The hierarchy contains the taxonomy.
+            TaxonomyEntry: A new TaxonomyEntry instance containing the reduced taxonomy label.
         """
-        ...
+        return replace(taxonomy, label=self.reduce_taxonomy(taxonomy.label, strict))
 
-    @overload
-    def has_taxonomy(self, taxonomy: str, strict: bool = False) -> bool:
-        """
-        Check if the hierarchy has the given taxonomy.
-
-        Args:
-            taxonomy (TaxonomyEntry): The taxonomy to check.
-            strict (bool, optional): Ensure every taxon exists. Defaults to False.
-
-        Returns:
-            bool: The hierarchy contains the taxonomy.
-        """
-        ...
-
-    def has_taxonomy(self, taxonomy: Union[str, TaxonomyEntry], strict: bool = False) -> bool:
-        if isinstance(taxonomy, TaxonomyEntry):
-            taxonomy = taxonomy.label
-        taxons = split_taxonomy(taxonomy)
-        return self.has_taxons(taxons, strict)
-
-    @overload
     def reduce_taxonomy(self, taxonomy: str, strict: bool = False) -> str:
         """
         Reduce the taxonomy to a valid known taxonomy label in the hierarchy.
@@ -417,44 +434,18 @@ class TaxonomyHierarchy:
         Returns:
             str: The reduced taxonomy label.
         """
-        ...
+        return join_taxonomy(self.reduce_taxons(split_taxonomy(taxonomy), strict))
 
-    @overload
-    def reduce_taxonomy(self, taxonomy: TaxonomyEntry, strict: bool = False) -> TaxonomyEntry:
-        """
-        Reduce the taxonomy to a valid known taxonomy label in the hierarchy.
-
-        Args:
-            taxonomy (TaxonomyEntry): The taxonomy entry to reduce.
-            strict (bool, optional): Ensure every taxon exists. Defaults to False.
-
-        Returns:
-            TaxonomyEntry: A new TaxonomyEntry instance containing the reduced taxonomy label.
-        """
-        ...
-
-    def reduce_taxonomy(
-        self,
-        taxonomy: Union[str, TaxonomyEntry],
-        strict: bool = False
-    ) -> Union[str, TaxonomyEntry]:
-        taxonomy_label = taxonomy.label if isinstance(taxonomy, TaxonomyEntry) else taxonomy
-        taxons = split_taxonomy(taxonomy_label)
-        reduced_taxonomy = join_taxonomy(self.reduce_taxons(taxons, strict))
-        if isinstance(taxonomy, TaxonomyEntry):
-            return replace(taxonomy, label=reduced_taxonomy)
-        return reduced_taxonomy
-
-    def reduce_taxons(self, taxons: Tuple[str], strict: bool = False) -> Tuple[str]:
+    def reduce_taxons(self, taxons: Tuple[str, ...], strict: bool = False) -> Tuple[str, ...]:
         """
         Reduce the taxonomy tuple to a valid known taxonomy in the hierarchy.
 
         Args:
-            taxons (Tuple[str]): The taxonomy tuple to reduce.
+            taxons (Tuple[str, ...]): The taxonomy tuple to reduce.
             strict (bool, optional): Ensure every taxon exists. Defaults to False.
 
         Returns:
-            Tuple[str]: The reduced taxonomy tuple.
+            Tuple[str, ...]: The reduced taxonomy tuple.
         """
         if strict:
             for rank, taxon in enumerate(taxons):
@@ -475,7 +466,7 @@ class TaxonomyHierarchy:
             pad (bool): Pad the taxonomy with -1s to the depth of the hierarchy. Defaults to False.
 
         Returns:
-            Tuple[str]: The tokenized taxonomy.
+            Tuple[str, ...]: The tokenized taxonomy.
         """
         return self.tokenize_taxons(split_taxonomy(taxonomy), pad)
 
@@ -484,11 +475,11 @@ class TaxonomyHierarchy:
         Tokenize the taxonomy tuple into a a tuple of taxon integer IDs
 
         Args:
-            taxons (Tuple[str]): The taxonomy tuple to tokenize.
+            taxons (Tuple[str, ...]): The taxonomy tuple to tokenize.
             pad (bool): Pad the taxonomy with -1s to the depth of the hierarchy. Defaults to False.
 
         Returns:
-            Tuple[str]: The tokenized taxonomy.
+            Tuple[str, ...]: The tokenized taxonomy.
         """
         result = np.empty(len(taxons), np.int64) if not pad else np.full(self.depth, -1, np.int64)
         for rank, taxon in enumerate(taxons):
@@ -515,7 +506,7 @@ class TaxonomyHierarchy:
             taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
 
         Returns:
-            Tuple[str]: The detokenized taxonomy tuple.
+            Tuple[str, ...]: The detokenized taxonomy tuple.
         """
         result = tuple()
         for rank, token in enumerate(taxon_tokens):

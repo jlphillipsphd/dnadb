@@ -321,7 +321,7 @@ class TestTaxonomyHierarchy(unittest.TestCase):
 
     def test_has_taxonomy(self):
         for entry in self.taxonomy_entries:
-            self.assertTrue(self.hierarchy.has_taxonomy(entry), "TaxonomyEntry")
+            self.assertTrue(self.hierarchy.has_entry(entry), "TaxonomyEntry")
             self.assertTrue(self.hierarchy.has_taxonomy(entry.label), "taxonomy string")
 
     def test_has_taxonomy_strict(self):
