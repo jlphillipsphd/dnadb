@@ -1,3 +1,4 @@
+from dataclasses import replace
 import enum
 from functools import cached_property
 from pathlib import Path
@@ -52,13 +53,12 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
             self.__build_taxonomy_map()
 
     def __build_dna_fasta(self):
-        print("Converting FASTA to DNA...")
-        fasta_path = Path((self.path / self.fasta_file).stem) # remove .gz extension
+        print("Converting RNA to DNA...")
+        fasta_path = Path(self.path / self.fasta_file).with_suffix("") # remove .gz extension
         fasta_path.parent.mkdir(exist_ok=True)
 
         def map_to_dna(entry: fasta.FastaEntry) -> fasta.FastaEntry:
-            entry.sequence = to_dna(entry.sequence)
-            return entry
+            return replace(entry, sequence=to_dna(entry.sequence))
         entry_iterator = fasta.entries(self.path / self.__rna_fasta_file)
         entry_iterator = map(map_to_dna, entry_iterator)
         with open(fasta_path, 'w') as file:
@@ -69,7 +69,8 @@ class Silva(RemoteDatasetMixin, VersionedDataset, InterfacesWithFasta, Interface
 
     def __build_taxonomy_map(self):
         print("Building taxonomy map...")
-        taxonomy_file_path = Path((self.path / self.taxonomy_file).stem) # remove .gz extension
+        # remove .gz extension
+        taxonomy_file_path = Path(self.path / self.taxonomy_file).with_suffix("")
         taxonomy_file_path.parent.mkdir(exist_ok=True)
 
         input_taxonomy = open_file(self.path / self.__taxonomy_file, 'r')
