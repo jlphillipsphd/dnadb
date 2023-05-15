@@ -15,7 +15,7 @@ verbose = True
 #allowed_ranks_list = [('domain','d__'), ('kingdom','k__'), ('phylum','p__'),
 #                      ('class','c__'), ('order','o__'), ('family','f__'),
 #                      ('genus','g__')]
-allowed_ranks_list = [('domain','d__'), ('phylum','p__'),
+allowed_ranks_list = [('domain','k__'), ('phylum','p__'),
                       ('class','c__'), ('order','o__'), ('family','f__'),
                       ('genus','g__')]
 allowed_ranks_dict = dict(allowed_ranks_list)
