@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from functools import singledispatchmethod
 import io
-from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
 from typing import Generator, Iterable, Tuple, Union
@@ -9,6 +8,8 @@ from typing import Generator, Iterable, Tuple, Union
 from .db import DbFactory, DbWrapper
 from .taxonomy import TaxonomyEntry
 from .utils import open_file
+
+_int_t = Union[int, np.int32, np.int64]
 
 @dataclass(frozen=True, order=True)
 class FastaEntry:
@@ -88,7 +89,7 @@ class FastaDb(DbWrapper):
         return self.length
 
     @singledispatchmethod
-    def __contains__(self, sequence_index: int) -> bool:
+    def __contains__(self, sequence_index: _int_t) -> bool:
         return str(sequence_index) in self.db
 
     @__contains__.register
@@ -104,7 +105,7 @@ class FastaDb(DbWrapper):
             yield self[i]
 
     @singledispatchmethod
-    def __getitem__(self, sequence_index: int) -> FastaEntry:
+    def __getitem__(self, sequence_index: _int_t) -> FastaEntry:
         return FastaEntry.deserialize(self.db[str(sequence_index)])
 
     @__getitem__.register

@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import io
-from lmdbm import Lmdb
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
@@ -9,12 +8,14 @@ from typing import Generator, Iterable, Tuple, Union
 from .db import DbFactory, DbWrapper
 from .utils import open_file
 
-def phred_encode(probabilities: npt.ArrayLike, encoding: int = 33) -> str:
+_int_t = Union[int, np.int32, np.int64]
+
+def phred_encode(probabilities: npt.ArrayLike, encoding: _int_t = 33) -> str:
     scores = (-10 * np.log10(np.array(probabilities))).astype(int)
     return ''.join((chr(score + encoding)) for score in scores)
 
 
-def phred_decode(qualities: str, encoding: int = 33) -> npt.NDArray[np.float64]:
+def phred_decode(qualities: str, encoding: _int_t = 33) -> npt.NDArray[np.float64]:
     scores = np.array([(ord(token) - encoding) for token in qualities])
     return 10**(scores / -10)
 
@@ -38,14 +39,14 @@ class FastqHeader:
     )
 
     instrument: str
-    run_number: int
+    run_number: _int_t
     flowcell_id: str
-    lane: int
-    tile: int
+    lane: _int_t
+    tile: _int_t
     pos: Tuple[int, int]
-    read_type: int
+    read_type: _int_t
     is_filtered: bool
-    control_number: int
+    control_number: _int_t
     sequence_index: str
 
     @classmethod
@@ -131,7 +132,7 @@ class FastqDbFactory(DbFactory):
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
-    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
+    def __init__(self, path: Union[str, Path], chunk_size: _int_t = 10000):
         super().__init__(path, chunk_size)
         self.num_entries = np.int32(0)
 
@@ -159,14 +160,14 @@ class FastqDb(DbWrapper):
     def __len__(self):
         return self.length
 
-    def __contains__(self, sequence_index: int) -> bool:
+    def __contains__(self, sequence_index: _int_t) -> bool:
         return str(sequence_index) in self.db
 
     def __iter__(self):
         for i in range(len(self)):
             yield self[i]
 
-    def __getitem__(self, sequence_index: int) -> FastqEntry:
+    def __getitem__(self, sequence_index: _int_t) -> FastqEntry:
         return FastqEntry.deserialize(self.db[str(sequence_index)])
 
 

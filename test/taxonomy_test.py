@@ -182,11 +182,11 @@ class TestTaxonomyDb(unittest.TestCase):
         # 7 unique label entries
         self.assertEqual(len(self.taxonomy_db), 7)
 
-    def test_contains_identifier(self):
+    def test_contains_fasta_id(self):
         """
         Check that the taxonomy database contains a FASTA identifier.
         """
-        self.assertTrue(self.taxonomy_db.contains_id(self.taxonomy_entries[0].identifier))
+        self.assertTrue(self.taxonomy_db.contains_fasta_id(self.taxonomy_entries[0].identifier))
 
     def test_contains_label(self):
         """
@@ -207,22 +207,30 @@ class TestTaxonomyDb(unittest.TestCase):
         """
         self.assertEqual(list(self.taxonomy_db.counts()), [1, 1, 1, 1, 2, 1, 1])
 
-    def test_id_to_index(self):
+    def test_fasta_id(self):
+        """
+        Check that the taxonomy database maps a label index to its corresponding FASTA identifier.
+        """
+        self.assertEqual(self.taxonomy_db.fasta_id_with_label(0, 0), self.taxonomy_entries[0].identifier)
+        self.assertEqual(self.taxonomy_db.fasta_id_with_label(4, 0), self.taxonomy_entries[4].identifier)
+        self.assertEqual(self.taxonomy_db.fasta_id_with_label(4, 1), self.taxonomy_entries[7].identifier)
+
+    def test_fasta_id_to_index(self):
         """
         Check that the taxonomy database maps a FASTA identifier to its corresponding label index.
         """
-        self.assertEqual(self.taxonomy_db.id_to_index(self.taxonomy_entries[0].identifier), 0)
-        self.assertEqual(self.taxonomy_db.id_to_index(self.taxonomy_entries[7].identifier), 4)
+        self.assertEqual(self.taxonomy_db.fasta_id_to_index(self.taxonomy_entries[0].identifier), 0)
+        self.assertEqual(self.taxonomy_db.fasta_id_to_index(self.taxonomy_entries[7].identifier), 4)
 
-    def test_id_to_label(self):
+    def test_fasta_id_to_label(self):
         """
         Check that the taxonomy database maps a FASTA identifier to its corresponding label.
         """
         self.assertEqual(
-            self.taxonomy_db.id_to_label(self.taxonomy_entries[0].identifier),
+            self.taxonomy_db.fasta_id_to_label(self.taxonomy_entries[0].identifier),
             self.taxonomy_entries[0].label)
         self.assertEqual(
-            self.taxonomy_db.id_to_label(self.taxonomy_entries[7].identifier),
+            self.taxonomy_db.fasta_id_to_label(self.taxonomy_entries[7].identifier),
             self.taxonomy_entries[4].label)
 
     def test_label(self):
@@ -265,38 +273,6 @@ class TestTaxon(unittest.TestCase):
         self.assertIs(self.a[self.b], self.b)
 
 
-class TestTaxonDict(unittest.TestCase):
-    def setUp(self):
-        self.taxon_dict = taxonomy.TaxonomyHierarchy.TaxonDict()
-        self.taxon_a = taxonomy.Taxon(rank=0, name="TaxonA", parent=None)
-        self.taxon_b = taxonomy.Taxon(rank=0, name="TaxonB", parent=None)
-        self.taxon_dict.insert(self.taxon_a)
-        self.taxon_dict.insert(self.taxon_b)
-
-    def test_insert(self):
-        self.assertEqual(len(self.taxon_dict), 2)
-
-    def test_contains(self):
-        self.assertIn(self.taxon_a, self.taxon_dict)
-        self.assertIn(self.taxon_b, self.taxon_dict)
-        self.assertIn(self.taxon_a.name, self.taxon_dict)
-        self.assertIn(self.taxon_b.name.upper(), self.taxon_dict)
-
-    def test_getitem(self):
-        self.assertIs(self.taxon_dict[self.taxon_a], self.taxon_a)
-        self.assertIs(self.taxon_dict[self.taxon_b], self.taxon_b)
-        self.assertIs(self.taxon_dict[self.taxon_a.name], self.taxon_a)
-        self.assertIs(self.taxon_dict[self.taxon_b.name.upper()], self.taxon_b)
-
-    def test_delitem(self):
-        del self.taxon_dict[self.taxon_a]
-        self.assertNotIn(self.taxon_a, self.taxon_dict)
-        self.assertNotIn(self.taxon_a.name, self.taxon_dict)
-        self.assertIn(self.taxon_b, self.taxon_dict)
-        del self.taxon_dict[self.taxon_b.name.upper()]
-        self.assertNotIn(self.taxon_b, self.taxon_dict)
-
-
 class TestTaxonomyHierarchy(unittest.TestCase):
     def setUp(self):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE)
@@ -311,37 +287,27 @@ class TestTaxonomyHierarchy(unittest.TestCase):
         self.assertEqual(self.hierarchy.depth, 7)
 
     def test_taxon_counts(self):
-        self.assertEqual(len(self.hierarchy.taxons[0]), 2)
-        self.assertEqual(len(self.hierarchy.taxons[1]), 4)
-        self.assertEqual(len(self.hierarchy.taxons[2]), 3)
-        self.assertEqual(len(self.hierarchy.taxons[3]), 3)
-        self.assertEqual(len(self.hierarchy.taxons[4]), 2)
-        self.assertEqual(len(self.hierarchy.taxons[5]), 2)
-        self.assertEqual(len(self.hierarchy.taxons[6]), 1)
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[0]), 2, "Kingdom")
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[1]), 4, "Phylum")
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[2]), 3, "Class")
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[3]), 3, "Order")
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[4]), 2, "Family")
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[5]), 2, "Genus")
+        self.assertEqual(len(self.hierarchy.taxon_to_id_map[6]), 1, "Species")
 
     def test_has_taxonomy(self):
         for entry in self.taxonomy_entries:
             self.assertTrue(self.hierarchy.has_entry(entry), "TaxonomyEntry")
             self.assertTrue(self.hierarchy.has_taxonomy(entry.label), "taxonomy string")
-
-    def test_has_taxonomy_strict(self):
-        self.assertTrue(self.hierarchy.has_taxonomy(self.invalid_label, strict=False))
-        self.assertFalse(self.hierarchy.has_taxonomy(self.invalid_label, strict=True))
+        self.assertFalse(self.hierarchy.has_taxonomy(self.invalid_label))
 
     def test_reduce_taxons(self):
         taxons = taxonomy.split_taxonomy(self.invalid_label)
-        self.assertEqual(self.hierarchy.reduce_taxons(taxons), ("Bacteria", "Proteobacteria", "XYZ", "Acetobacterales"))
-
-    def test_reduce_taxons_strict(self):
-        taxons = taxonomy.split_taxonomy(self.invalid_label)
-        self.assertEqual(self.hierarchy.reduce_taxons(taxons, strict=True), ("Bacteria", "Proteobacteria"))
+        self.assertEqual(self.hierarchy.reduce_taxons(taxons), ("Bacteria", "Proteobacteria"))
 
     def test_reduce_taxonomy(self):
-        self.assertEqual(self.hierarchy.reduce_taxonomy(self.invalid_label), self.invalid_label)
         self.assertEqual(self.hierarchy.reduce_taxonomy(self.test_label), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
-
-    def test_reduce_taxonomy_strict(self):
-        self.assertEqual(self.hierarchy.reduce_taxonomy(self.invalid_label, strict=True), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
+        self.assertEqual(self.hierarchy.reduce_taxonomy(self.invalid_label), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
 
     def test_rebuild_taxon_id_maps_on_add(self):
         a = self.hierarchy.taxon_to_id_map
@@ -390,12 +356,11 @@ class TestTaxonomyHierarchyMerge(unittest.TestCase):
 
     def test_merge_hierarchy_max_depth(self):
         merged = taxonomy.TaxonomyHierarchy.merged([self.a, self.b])
-        for taxons_merged, taxons in zip(merged.taxons, self.hierarchy.taxons):
-            self.assertDictEqual(taxons_merged, taxons)
+        for taxon_a, taxon_b in zip(self.hierarchy, merged):
+            self.assertEqual(taxon_a, taxon_b)
 
     def test_merge_hierarchy_truncated_depth(self):
         depth = 4
         merged = taxonomy.TaxonomyHierarchy.merged([self.a, self.b], depth=depth)
-        self.assertEqual(len(merged.taxons), depth)
-        for taxons_merged, taxons in zip(merged.taxons, self.hierarchy.taxons[:depth]):
-            self.assertDictEqual(taxons_merged, taxons)
+        for taxon_a, taxon_b in zip(self.hierarchy, merged):
+            self.assertEqual(taxon_a, taxon_b)
