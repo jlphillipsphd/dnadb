@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field, replace
 import heapq
 import io
+import json
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
@@ -248,6 +249,21 @@ class Taxon:
 class TaxonomyHierarchy:
 
     @classmethod
+    def deserialize(cls, hierarchy_json_bytes: bytes) -> "TaxonomyHierarchy":
+        """
+        Deserialize a taxonomy hierarchy from a bytes object.
+        """
+        def recursive_add(taxon_json: Dict, parent: Taxon):
+            taxon = parent.add_child(taxon_json["name"])
+            for child_json in taxon_json["children"]:
+                recursive_add(child_json, taxon)
+        hierarchy_json = json.loads(hierarchy_json_bytes)
+        hierarchy = cls(hierarchy_json["depth"])
+        for taxon_json in hierarchy_json["taxons"]:
+            recursive_add(taxon_json, hierarchy.taxon_tree_head)
+        return hierarchy
+
+    @classmethod
     def from_dbs(cls, dbs: Iterable[TaxonomyDb], depth: int = 6) -> "TaxonomyHierarchy":
         """
         Create a taxonomy hierarchy from multiple taxonomy databases.
@@ -454,9 +470,10 @@ class TaxonomyHierarchy:
         Returns:
             np.ndarray[np.int32]: The tokenized taxonomy.
         """
+        taxons = taxons[:self.depth] # todo should we trim silently or throw error?
         result = np.empty(len(taxons), np.int32) if not pad else np.full(self.depth, -1, np.int32)
         head = self.taxon_tree_head
-        for taxon in taxons[:self.depth]:
+        for taxon in taxons:
             head = head[taxon]
             result[head.rank] = self.taxon_to_id_map[head.rank][head]
         return result
@@ -491,6 +508,30 @@ class TaxonomyHierarchy:
             result += (self.id_to_taxon_map[rank][token].name,)
         return result
 
+    def serialize(self) -> bytes:
+        """
+        Serialize the taxonomy hierarchy as a JSON string.
+        """
+        def dfs_serialize(head: Taxon):
+            return {
+                "name": head.name,
+                "children": [dfs_serialize(child) for child in head]
+            }
+        taxons = []
+        for head in self.taxon_tree_head:
+            taxons.append(dfs_serialize(head))
+        return json.dumps({
+            "depth": self.depth,
+            "taxons": taxons
+        }).encode()
+
+    @property
+    def taxon_counts(self) -> Tuple[int, ...]:
+        """
+        The number of taxons at each rank in the hierarchy.
+        """
+        return tuple(len(taxons) for taxons in self.taxon_to_id_map)
+
     @property
     def taxon_to_id_map(self) -> Tuple[Dict[Taxon, int], ...]:
         """
@@ -513,6 +554,15 @@ class TaxonomyHierarchy:
                 taxon_id = self.taxon_to_id_map[taxon.rank][taxon]
                 self._id_to_taxon_map[taxon.rank][taxon_id] = taxon
         return self._id_to_taxon_map
+
+    def __eq__(self, other: "TaxonomyHierarchy"):
+        """
+        Check if two taxonomy hierarchies are equal.
+        """
+        for taxon, other_taxon in zip(self, other):
+            if taxon != other_taxon:
+                return False
+        return True
 
     def __iter__(self) -> Generator[Taxon, None, None]:
         """

@@ -327,6 +327,11 @@ class TestTaxonomyHierarchy(unittest.TestCase):
         tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label)
         self.assertEqual(len(tokens), 3)
 
+    def test_tokenize_with_truncated_hierarchy(self):
+        truncated_hierarchy = taxonomy.TaxonomyHierarchy.merged([self.hierarchy], 2)
+        tokens = truncated_hierarchy.tokenize(self.taxonomy_entries[3].label)
+        self.assertEqual(len(tokens), 2)
+
     def test_tokenize_with_pad(self):
         tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label, pad=True)
         self.assertEqual(len(tokens), 7)
@@ -341,6 +346,11 @@ class TestTaxonomyHierarchy(unittest.TestCase):
         for entry in self.taxonomy_entries:
             tokens = self.hierarchy.tokenize(entry.label, pad=True)
             self.assertEqual(self.hierarchy.detokenize(tokens), entry.label)
+
+    def test_serialize_deserialize(self):
+        serialized = self.hierarchy.serialize()
+        deserialized = taxonomy.TaxonomyHierarchy.deserialize(serialized)
+        self.assertEqual(self.hierarchy, deserialized)
 
 class TestTaxonomyHierarchyMerge(unittest.TestCase):
     def setUp(self):
