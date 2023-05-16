@@ -249,7 +249,7 @@ class Taxon:
 class TaxonomyHierarchy:
 
     @classmethod
-    def deserialize(cls, hierarchy_json_bytes: bytes) -> "TaxonomyHierarchy":
+    def deserialize(cls, hierarchy_json_bytes: Union[str, bytes, bytearray]) -> "TaxonomyHierarchy":
         """
         Deserialize a taxonomy hierarchy from a bytes object.
         """
@@ -299,8 +299,6 @@ class TaxonomyHierarchy:
     def __init__(self, depth: int = 6):
         self.depth = depth
         self.taxon_tree_head = Taxon(-1, "_root_")
-        # self.taxons: Dict[str, Taxon] = {}
-        self._is_dirty: bool = False
         self._taxon_to_id_map: Optional[Tuple[Dict[Taxon, int], ...]] = None
         self._id_to_taxon_map: Optional[Tuple[Dict[int, Taxon], ...]] = None
 
@@ -524,6 +522,13 @@ class TaxonomyHierarchy:
             "depth": self.depth,
             "taxons": taxons
         }).encode()
+
+    @property
+    def taxons(self) -> Tuple[Tuple[Taxon, ...], ...]:
+        """
+        A tuple of tuples of taxons at each rank in the hierarchy.
+        """
+        return tuple(tuple(taxons.keys()) for taxons in self.taxon_to_id_map)
 
     @property
     def taxon_counts(self) -> Tuple[int, ...]:
