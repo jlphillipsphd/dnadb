@@ -1,6 +1,8 @@
 from lmdbm import Lmdb
 from pathlib import Path
-from typing import Callable, TypeVar, Union
+from typing import TypeVar, Union
+
+from .types import int_t
 
 T = TypeVar("T")
 
@@ -8,7 +10,7 @@ class DbFactory:
     """
     A factory for creating LMDB-backed databases of FASTA entries.
     """
-    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
+    def __init__(self, path: Union[str, Path], chunk_size: int_t = 10000):
         self.path = Path(path)
         if self.path.suffix != ".db":
             self.path = Path(str(self.path) + ".db")

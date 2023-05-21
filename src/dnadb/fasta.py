@@ -3,13 +3,12 @@ from functools import singledispatchmethod
 import io
 import numpy as np
 from pathlib import Path
-from typing import Generator, Iterable, Tuple, Union
+from typing import Generator, Iterable, Optional, Tuple, Union
 
 from .db import DbFactory, DbWrapper
 from .taxonomy import TaxonomyEntry
+from .types import int_t
 from .utils import open_file
-
-_int_t = Union[int, np.int32, np.int64]
 
 @dataclass(frozen=True, order=True)
 class FastaEntry:
@@ -89,7 +88,7 @@ class FastaDb(DbWrapper):
         return self.length
 
     @singledispatchmethod
-    def __contains__(self, sequence_index: _int_t) -> bool:
+    def __contains__(self, sequence_index: int_t) -> bool:
         return str(sequence_index) in self.db
 
     @__contains__.register
@@ -105,13 +104,82 @@ class FastaDb(DbWrapper):
             yield self[i]
 
     @singledispatchmethod
-    def __getitem__(self, sequence_index: _int_t) -> FastaEntry:
+    def __getitem__(self, sequence_index: int_t) -> FastaEntry:
         return FastaEntry.deserialize(self.db[str(sequence_index)])
 
     @__getitem__.register
     def _(self, sequence_id: str) -> FastaEntry:
         index = np.frombuffer(self.db[f"id_{sequence_id}"], dtype=np.int32, count=1)[0]
         return self[index]
+
+
+class FastaIndexDbFactory(DbFactory):
+    """
+    A factory for creating a FastaIndexDb.
+    """
+    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
+        super().__init__(path, chunk_size)
+        self.num_entries = np.int64(0)
+
+    def write_entry(self, fasta_entry_or_fasta_id: Union[str, FastaEntry], key: Optional[str] = None):
+        if isinstance(fasta_entry_or_fasta_id, FastaEntry):
+            fasta_identifier = fasta_entry_or_fasta_id.identifier
+        else:
+            fasta_identifier = fasta_entry_or_fasta_id
+
+        self.write(f"id_{fasta_identifier}", np.int64(self.num_entries).tobytes())
+        self.write(str(self.num_entries), fasta_identifier.encode())
+        if key is not None:
+            self.write(f"key_{key}", np.int64(self.num_entries).tobytes())
+            self.write(f"key_index_{self.num_entries}", key.encode())
+        self.num_entries += 1
+
+    def write_entries(self, fasta_entries_or_fasta_ids: Iterable[Union[str, FastaEntry]]):
+        for entry in fasta_entries_or_fasta_ids:
+            self.write_entry(entry)
+
+    def before_close(self):
+        self.write("length", self.num_entries.tobytes())
+        return super().before_close()
+
+
+class FastaIndexDb(DbWrapper):
+    """
+    An LMDB-backed database maintaining an index that maps indices/keys to FASTA identifiers.
+    """
+    def __init__(self, path: Union[str, Path]):
+        super().__init__(path)
+        self.length = np.frombuffer(self.db["length"], dtype=np.int64, count=1)[0]
+
+    def contains_fasta_id(self, fasta_id: str) -> bool:
+        return f"id_{fasta_id}" in self.db
+
+    def contains_index(self, index: int) -> bool:
+        return index >= 0 and index < self.length
+
+    def contains_key(self, key: str) -> bool:
+        return f"key_{key}" in self.db
+
+    def fasta_id_to_index(self, fasta_id: str) -> int:
+        return np.frombuffer(self.db[f"id_{fasta_id}"], dtype=np.int64, count=1)[0]
+
+    def fasta_id_to_key(self, fasta_id: str) -> str:
+        return self.index_to_key(self.fasta_id_to_index(fasta_id))
+
+    def index_to_fasta_id(self, index: int) -> str:
+        return self.db[str(index)].decode()
+
+    def index_to_key(self, index: int) -> str:
+        return self.db[f"key_index_{index}"].decode()
+
+    def key_to_fasta_id(self, key: str) -> str:
+        return self.index_to_fasta_id(self.key_to_index(key))
+
+    def key_to_index(self, key: str) -> int:
+        return np.frombuffer(self.db[f"key_{key}"], dtype=np.int64, count=1)[0]
+
+    def __len__(self):
+        return self.length
 
 
 def entries(

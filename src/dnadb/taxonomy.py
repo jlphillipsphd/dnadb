@@ -9,9 +9,8 @@ import re
 from typing import Dict, Generator, Iterable, List, Optional, Tuple, Union
 
 from .db import DbFactory, DbWrapper
+from .types import int_t
 from .utils import open_file
-
-_int_t = Union[int, np.int32, np.int64]
 
 RANKS = ("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
 RANK_PREFIXES = ''.join(rank[0] for rank in RANKS).lower()
@@ -144,7 +143,7 @@ class TaxonomyDb(DbWrapper):
         """
         return label in self.db
 
-    def count(self, label_index: _int_t) -> int:
+    def count(self, label_index: int_t) -> int:
         """
         Get the number of sequences with a given label index.
         """
@@ -157,13 +156,13 @@ class TaxonomyDb(DbWrapper):
         for i in range(self.length):
             yield self.count(i)
 
-    def fasta_id_with_label(self, label_index: _int_t, fasta_index: _int_t) -> str:
+    def fasta_id_with_label(self, label_index: int_t, fasta_index: int_t) -> str:
         """
         Get the FASTA identifier for a given label and index.
         """
         return self.db[f"{label_index}_{fasta_index}"].decode()
 
-    def fasta_ids_with_label(self, label_index: _int_t) -> Generator[str, None, None]:
+    def fasta_ids_with_label(self, label_index: int_t) -> Generator[str, None, None]:
         """
         Get the FASTA identifiers for a given label.
         """
@@ -182,7 +181,7 @@ class TaxonomyDb(DbWrapper):
         """
         return self.label(self.fasta_id_to_index(fasta_identifier))
 
-    def label(self, label_index: _int_t) -> str:
+    def label(self, label_index: int_t) -> str:
         """
         Get the taxonomy label for a given index.
         """

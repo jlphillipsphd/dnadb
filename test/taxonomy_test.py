@@ -374,3 +374,7 @@ class TestTaxonomyHierarchyMerge(unittest.TestCase):
         merged = taxonomy.TaxonomyHierarchy.merged([self.a, self.b], depth=depth)
         for taxon_a, taxon_b in zip(self.hierarchy, merged):
             self.assertEqual(taxon_a, taxon_b)
+
+
+if __name__ == "__main__":
+    unittest.main()

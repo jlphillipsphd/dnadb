@@ -37,8 +37,7 @@ class TestFastaEntry(unittest.TestCase):
 
 
 class TestFastaDb(unittest.TestCase):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def setUp(self):
         fasta_file = io.StringIO(FASTA_SAMPLE)
         self.fasta_lines = FASTA_SAMPLE.split('\n')
         self.fasta_entries = list(fasta.read(fasta_file))
@@ -48,6 +47,15 @@ class TestFastaDb(unittest.TestCase):
         factory.close()
         # Open DB for testing
         self.db = fasta.FastaDb("/tmp/test.db")
+
+    def tearDown(self):
+        """
+        Remove the taxonomy database.
+        """
+        self.db.close()
+        for f in self.db.path.iterdir():
+            f.unlink()
+        self.db.path.rmdir()
 
     def test_length(self):
         self.assertEqual(len(self.db), 2)
@@ -72,6 +80,71 @@ class TestFastaDb(unittest.TestCase):
     def test_get_sequence_by_id(self):
         self.assertEqual(self.db["12345"], self.fasta_entries[0])
         self.assertEqual(self.db["12346"], self.fasta_entries[1])
+
+
+class TestFastaIndexDb(unittest.TestCase):
+    def setUp(self):
+        fasta_file = io.StringIO(FASTA_SAMPLE)
+        self.fasta_lines = FASTA_SAMPLE.split('\n')
+        self.fasta_entries = list(fasta.read(fasta_file))
+        # Create FASTA DB
+        factory = fasta.FastaDbFactory("/tmp/test.db")
+        factory.write_entries(self.fasta_entries)
+        factory.close()
+        # Create FASTA Index DB
+        factory = fasta.FastaIndexDbFactory("/tmp/test.index.db")
+        for i, entry in enumerate(self.fasta_entries):
+            factory.write_entry(entry.identifier, f"otu_{i}")
+        factory.close()
+        # Open DB for testing
+        self.db = fasta.FastaIndexDb("/tmp/test.db")
+        self.index_db = fasta.FastaIndexDb("/tmp/test.index.db")
+
+    def tearDown(self) -> None:
+        for db in (self.db, self.index_db):
+            db.close()
+            for f in db.path.iterdir():
+                f.unlink()
+            db.path.rmdir()
+
+    def test_length(self):
+        self.assertEqual(len(self.index_db), 2)
+
+    def test_contains_fasta_id(self):
+        self.assertTrue(self.index_db.contains_fasta_id("12345"))
+        self.assertTrue(self.index_db.contains_fasta_id("12346"))
+
+    def test_contains_index(self):
+        self.assertTrue(self.index_db.contains_index(0))
+        self.assertTrue(self.index_db.contains_index(1))
+
+    def test_contains_key(self):
+        self.assertTrue(self.index_db.contains_key("otu_0"))
+        self.assertTrue(self.index_db.contains_key("otu_1"))
+
+    def test_fasta_id_to_index(self):
+        self.assertEqual(self.index_db.fasta_id_to_index("12345"), 0)
+        self.assertEqual(self.index_db.fasta_id_to_index("12346"), 1)
+
+    def test_fasta_id_to_key(self):
+        self.assertEqual(self.index_db.fasta_id_to_key("12345"), "otu_0")
+        self.assertEqual(self.index_db.fasta_id_to_key("12346"), "otu_1")
+
+    def test_index_to_fasta_id(self):
+        self.assertEqual(self.index_db.index_to_fasta_id(0), "12345")
+        self.assertEqual(self.index_db.index_to_fasta_id(1), "12346")
+
+    def test_index_to_key(self):
+        self.assertEqual(self.index_db.index_to_key(0), "otu_0")
+        self.assertEqual(self.index_db.index_to_key(1), "otu_1")
+
+    def test_key_to_fasta_id(self):
+        self.assertEqual(self.index_db.key_to_fasta_id("otu_0"), "12345")
+        self.assertEqual(self.index_db.key_to_fasta_id("otu_1"), "12346")
+
+    def test_key_to_index(self):
+        self.assertEqual(self.index_db.key_to_index("otu_0"), 0)
+        self.assertEqual(self.index_db.key_to_index("otu_1"), 1)
 
 
 if __name__ == "__main__":
