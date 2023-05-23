@@ -259,7 +259,7 @@ class DemultiplexedFastaSample(FastaSample):
 
 def load_fasta(
     fasta_db_or_path: Union[FastaDb, Union[str, Path]],
-    name: Optional[str]
+    name: Optional[str] = None
 ) -> FastaSample:
     if not isinstance(fasta_db_or_path, FastaDb):
         fasta_db_or_path = FastaDb(fasta_db_or_path)
@@ -268,7 +268,7 @@ def load_fasta(
 
 def load_fastq(
     fastq_db_or_path: Union[FastqDb, Union[str, Path]],
-    name: Optional[str]
+    name: Optional[str] = None
 ) -> FastqSample:
     if not isinstance(fastq_db_or_path, FastqDb):
         fastq_db_or_path = FastqDb(fastq_db_or_path)
@@ -278,9 +278,7 @@ def load_fastq(
 def load_multiplexed_fasta(
     fasta_db_or_path: Union[FastaDb, Union[str, Path]],
     sample_mapping_db_or_path: Union[SampleMappingDb, Union[str, Path]],
-    fasta_index_db_or_path: Optional[Union[FastaIndexDb, Union[str, Path]]] = None,
-
-
+    fasta_index_db_or_path: Optional[Union[FastaIndexDb, Union[str, Path]]] = None
 ) -> Tuple[DemultiplexedFastaSample, ...]:
     if not isinstance(fasta_db_or_path, FastaDb):
         fasta_db_or_path = FastaDb(fasta_db_or_path)
