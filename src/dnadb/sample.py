@@ -5,9 +5,8 @@ import numpy.typing as npt
 from pathlib import Path
 from typing import Generator, Iterable, Optional, Tuple, Union
 
-from dnadb.fasta import FastaEntry
-
 from .db import DbFactory, DbWrapper
+from .dna import AbstractSequenceWrapper
 from .fasta import FastaDb, FastaEntry, FastaIndexDb
 from .fastq import FastqDb, FastqEntry
 from .types import int_t
@@ -133,6 +132,14 @@ class SampleMappingDb(DbWrapper):
 class SampleInterface(abc.ABC):
     def __init__(self, name: str):
         self.name = name
+
+    @abc.abstractmethod
+    def sample(
+        self,
+        n: int,
+        rng: np.random.Generator = np.random.default_rng()
+    ) -> Generator[AbstractSequenceWrapper, None, None]:
+        raise NotImplementedError()
 
     @abc.abstractmethod
     def __contains__(self, key) -> bool:

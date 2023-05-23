@@ -1,4 +1,4 @@
-import abc
+from dataclasses import dataclass
 import itertools
 import numpy as np
 import numpy.typing as npt
@@ -132,3 +132,14 @@ def to_dna(rna_sequence: str) -> str:
     Convert a DNA sequence to RNA.
     """
     return rna_sequence.replace('U', 'T')
+
+# Data Classes -------------------------------------------------------------------------------------
+
+@dataclass(init=False, frozen=True)
+class AbstractSequenceWrapper:
+    __slots__ = ("sequence",)
+
+    sequence: str
+
+    def __len__(self):
+        return len(self.sequence)

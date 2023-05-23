@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import Generator, Iterable, Optional, Tuple, Union
 
 from .db import DbFactory, DbWrapper
+from .dna import AbstractSequenceWrapper
 from .taxonomy import TaxonomyEntry
 from .types import int_t
 from .utils import open_file
 
 @dataclass(frozen=True, order=True)
-class FastaEntry:
+class FastaEntry(AbstractSequenceWrapper):
     """
     A container class to represent a FASTA entry
     """

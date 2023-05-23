@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Generator, Iterable, Tuple, Union
 
 from .db import DbFactory, DbWrapper
+from .dna import AbstractSequenceWrapper
 from .types import int_t
 from .utils import open_file
 
@@ -96,7 +97,7 @@ class FastqHeader:
 
 
 @dataclass(frozen=True, order=True)
-class FastqEntry:
+class FastqEntry(AbstractSequenceWrapper):
     """
     A class representation of a FASTQ entry containing the sequnce identifier, sequence, and quality
     scores.
