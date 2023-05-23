@@ -102,10 +102,9 @@ class FastqEntry(AbstractSequenceWrapper):
     A class representation of a FASTQ entry containing the sequnce identifier, sequence, and quality
     scores.
     """
-    __slots__ = ("header_str", "sequence", "quality_scores")
+    __slots__ = ("header_str", "quality_scores")
 
     header_str: str
-    sequence: str
     quality_scores: str
 
     @classmethod
@@ -116,6 +115,11 @@ class FastqEntry(AbstractSequenceWrapper):
     def from_str(cls, entry: str) -> "FastqEntry":
         header, sequence, _, quality_scores= entry.rstrip().split('\n')
         return cls(header, sequence, quality_scores)
+
+    def __init__(self, header: str, sequence: str, quality_scores: str):
+        object.__setattr__(self, "header_str", header)
+        object.__setattr__(self, "sequence", sequence)
+        object.__setattr__(self, "quality_scores", quality_scores)
 
     def serialize(self) -> bytes:
         return '\x00'.join((self.header_str, self.sequence, self.quality_scores)).encode()

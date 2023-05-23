@@ -42,11 +42,11 @@ class TestFastaDb(unittest.TestCase):
         self.fasta_lines = FASTA_SAMPLE.split('\n')
         self.fasta_entries = list(fasta.read(fasta_file))
         # Create DB
-        factory = fasta.FastaDbFactory("/tmp/test.db")
+        factory = fasta.FastaDbFactory("/tmp/test.fasta.db")
         factory.write_entries(self.fasta_entries)
         factory.close()
         # Open DB for testing
-        self.db = fasta.FastaDb("/tmp/test.db")
+        self.db = fasta.FastaDb(factory.path)
 
     def tearDown(self):
         """
@@ -78,6 +78,7 @@ class TestFastaDb(unittest.TestCase):
         self.assertEqual(self.db[1], self.fasta_entries[1])
 
     def test_get_sequence_by_id(self):
+        print("\n\n", self.fasta_entries, "\n\n")
         self.assertEqual(self.db["12345"], self.fasta_entries[0])
         self.assertEqual(self.db["12346"], self.fasta_entries[1])
 
@@ -88,7 +89,7 @@ class TestFastaIndexDb(unittest.TestCase):
         self.fasta_lines = FASTA_SAMPLE.split('\n')
         self.fasta_entries = list(fasta.read(fasta_file))
         # Create FASTA DB
-        factory = fasta.FastaDbFactory("/tmp/test.db")
+        factory = fasta.FastaDbFactory("/tmp/test.fasta.db")
         factory.write_entries(self.fasta_entries)
         factory.close()
         # Create FASTA Index DB
@@ -97,11 +98,10 @@ class TestFastaIndexDb(unittest.TestCase):
             factory.write_entry(entry.identifier, f"otu_{i}")
         factory.close()
         # Open DB for testing
-        self.db = fasta.FastaIndexDb("/tmp/test.db")
-        self.index_db = fasta.FastaIndexDb("/tmp/test.index.db")
+        self.index_db = fasta.FastaIndexDb(factory.path)
 
     def tearDown(self) -> None:
-        for db in (self.db, self.index_db):
+        for db in (self.index_db,):
             db.close()
             for f in db.path.iterdir():
                 f.unlink()

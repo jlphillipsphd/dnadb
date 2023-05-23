@@ -16,10 +16,9 @@ class FastaEntry(AbstractSequenceWrapper):
     """
     A container class to represent a FASTA entry
     """
-    __slots__ = ("identifier", "sequence", "extra")
+    __slots__ = ("identifier", "extra")
 
     identifier: str
-    sequence: str
     extra: str
 
     @classmethod
@@ -40,6 +39,11 @@ class FastaEntry(AbstractSequenceWrapper):
         extra = header_line[1] if len(header_line) > 1 else ""
         sequence = "".join(sequence_parts)
         return cls(identifier, sequence, extra)
+
+    def __init__(self, identifier: str, sequence: str, extra: str = ""):
+        object.__setattr__(self, "identifier", identifier)
+        object.__setattr__(self, "sequence", sequence)
+        object.__setattr__(self, "extra", extra)
 
     def serialize(self) -> bytes:
         return "\x00".join((self.identifier, self.sequence, self.extra)).encode()

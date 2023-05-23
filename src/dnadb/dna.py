@@ -33,9 +33,6 @@ for __base, __bases in IUPAC_MAP.items():
     __repeated_bases = BASE_LOOKUP_TABLE[np.array(list(map(ord, __bases*__repeat)), np.uint8) - ord('A')]
     IUPAC_AUGMENT_LOOKUP_TABLE[BASE_LOOKUP_TABLE[ord(__base) - ord('A')]] = __repeated_bases
 
-ENC_AMBIGUOUS_BASE_MAP = {BASE_LOOKUP_TABLE[ord(b) - 65]: tuple(BASE_LOOKUP_TABLE[ord(c) - 65] for c in cs)
-    for b, cs in IUPAC_MAP.items()}
-
 # DNA Sequence Encoding/Decoding -------------------------------------------------------------------
 
 def encode(ascii_bases: npt.NDArray[np.uint8]) ->  npt.NDArray[np.uint8]:
@@ -135,7 +132,7 @@ def to_dna(rna_sequence: str) -> str:
 
 # Data Classes -------------------------------------------------------------------------------------
 
-@dataclass(init=False, frozen=True)
+@dataclass(frozen=True)
 class AbstractSequenceWrapper:
     __slots__ = ("sequence",)
 
