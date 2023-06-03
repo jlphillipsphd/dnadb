@@ -118,7 +118,10 @@ class SampleMappingDb(DbWrapper):
 
     def __getitem__(self, index_or_name: Union[int, str]) -> SampleMappingEntry:
         if isinstance(index_or_name, str):
-            index_or_name = np.frombuffer(self.db[f"name_{index_or_name}"], dtype=np.int32, count=1)[0]
+            index_or_name = np.frombuffer(
+                self.db[f"name_{index_or_name}"],
+                dtype=np.int32,
+                count=1)[0]
         return SampleMappingEntry.deserialize(self.db[str(index_or_name)], self.fasta_index_db)
 
     def __len__(self):
@@ -160,16 +163,17 @@ class FastaSample(SampleInterface):
         self.fasta_db = fasta_db
 
     def sample(
-        self, n: int_t,
+        self,
+        n: int_t,
         replace: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ) -> Generator[FastaEntry, None, None]:
         indices = rng.choice(len(self.fasta_db), size=n, replace=replace)
         indices, counts = np.unique(indices, return_counts=True)
         for index, count in zip(indices, counts):
-            fastq_entry = self.fasta_db[index]
+            fasta_entry = self.fasta_db[index]
             for _ in range(count):
-                yield fastq_entry
+                yield fasta_entry
 
     def __contains__(self, index_or_id: Union[int, str]) -> bool:
         return index_or_id in self.fasta_db
@@ -190,7 +194,8 @@ class FastqSample(SampleInterface):
         self.fastq_db = fastq_db
 
     def sample(
-        self, n: int_t,
+        self,
+        n: int_t,
         replace: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ) -> Generator[FastqEntry, None, None]:
