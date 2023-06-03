@@ -337,6 +337,11 @@ class TestTaxonomyHierarchy(unittest.TestCase):
         self.assertEqual(len(tokens), 7)
         self.assertEqual(tuple(tokens[3:]), (-1, -1, -1, -1))
 
+    def test_tokenize_with_pad_and_include_missing(self):
+        tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label, pad=True, include_missing=True)
+        self.assertEqual(len(tokens), 7)
+        self.assertEqual(tuple(tokens[3:]), (0, 0, 0, 0))
+
     def test_detokenize(self):
         for entry in self.taxonomy_entries:
             tokens = self.hierarchy.tokenize(entry.label, pad=False)
@@ -346,6 +351,11 @@ class TestTaxonomyHierarchy(unittest.TestCase):
         for entry in self.taxonomy_entries:
             tokens = self.hierarchy.tokenize(entry.label, pad=True)
             self.assertEqual(self.hierarchy.detokenize(tokens), entry.label)
+
+    def test_detokenize_with_pad_and_include_missing(self):
+        for entry in self.taxonomy_entries:
+            tokens = self.hierarchy.tokenize(entry.label, pad=True, include_missing=True)
+            self.assertEqual(self.hierarchy.detokenize(tokens, include_missing=True), entry.label)
 
     def test_serialize_deserialize(self):
         serialized = self.hierarchy.serialize()

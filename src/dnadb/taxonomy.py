@@ -434,7 +434,7 @@ class TaxonomyHierarchy:
         Returns:
             Tuple[str, ...]: The reduced taxonomy tuple.
         """
-        result = tuple()
+        result: Tuple[str, ...] = tuple()
         head = self.taxon_tree_head
         for taxon in taxons[:self.depth]:
             if taxon not in head:
@@ -443,26 +443,38 @@ class TaxonomyHierarchy:
             head = head[taxon]
         return result
 
-    def tokenize(self, taxonomy: str, pad: bool = False) -> npt.NDArray[np.int32]:
+    def tokenize(
+        self,
+        taxonomy: str,
+        pad: bool = False,
+        include_missing: bool = False
+    ) -> npt.NDArray[np.int32]:
         """
         Tokenize the taxonomy label into a a tuple of taxon integer IDs
 
         Args:
             taxonomy (str): The taxonomy label to tokenize (e.g. "k__Bacteria; ...").
             pad (bool): Pad the taxonomy with -1s to the depth of the hierarchy. Defaults to False.
+            include_missing (bool): Assign missing taxons in the tokenized taxonomy to 0. Defaults to False.
 
         Returns:
             np.ndarray[np.int32]: The tokenized taxonomy.
         """
-        return self.tokenize_taxons(split_taxonomy(taxonomy), pad)
+        return self.tokenize_taxons(split_taxonomy(taxonomy), pad, include_missing)
 
-    def tokenize_taxons(self, taxons: Tuple[str, ...], pad: bool = False) -> npt.NDArray[np.int32]:
+    def tokenize_taxons(
+        self,
+        taxons: Tuple[str, ...],
+        pad: bool = False,
+        include_missing: bool = False
+    ) -> npt.NDArray[np.int32]:
         """
         Tokenize the taxonomy tuple into a a tuple of taxon integer IDs
 
         Args:
             taxons (Tuple[str, ...]): The taxonomy tuple to tokenize.
             pad (bool): Pad the taxonomy with -1s to the depth of the hierarchy. Defaults to False.
+            include_missing (bool): Assign missing taxons in the tokenized taxonomy to 0. Defaults to False.
 
         Returns:
             np.ndarray[np.int32]: The tokenized taxonomy.
@@ -473,31 +485,41 @@ class TaxonomyHierarchy:
         for taxon in taxons:
             head = head[taxon]
             result[head.rank] = self.taxon_to_id_map[head.rank][head]
+        if include_missing:
+            result += 1
         return result
 
-    def detokenize(self, taxon_tokens: npt.NDArray[np.int32]) -> str:
+    def detokenize(self, taxon_tokens: npt.NDArray[np.int32], include_missing: bool = False) -> str:
         """
         Detokenize the taxonomy tokens into a taxonomy label.
 
         Args:
             taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
+            include_missing (bool): Assign missing taxons in the tokenized taxonomy to 0. Defaults to False.
 
         Returns:
             str: The detokenized taxonomy label.
         """
-        return join_taxonomy(self.detokenize_taxons(taxon_tokens))
+        return join_taxonomy(self.detokenize_taxons(taxon_tokens, include_missing))
 
-    def detokenize_taxons(self, taxon_tokens: npt.NDArray[np.int32]) -> Tuple[str, ...]:
+    def detokenize_taxons(
+        self,
+        taxon_tokens: npt.NDArray[np.int32],
+        include_missing: bool = False
+    ) -> Tuple[str, ...]:
         """
         Detokenize the taxonomy tokens into a taxonomy tuple.
 
         Args:
             taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
+            include_missing (bool): Assign missing taxons in the tokenized taxonomy to 0. Defaults to False.
 
         Returns:
             Tuple[str, ...]: The detokenized taxonomy tuple.
         """
-        result = tuple()
+        if include_missing:
+            taxon_tokens -= 1
+        result: Tuple[str, ...] = tuple()
         token: np.int32
         for rank, token in enumerate(taxon_tokens):
             if token < 0:
