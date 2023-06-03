@@ -188,7 +188,6 @@ def entries(
         yield from read(sequences)
     else:
         yield from sequences
-    raise TypeError(f"Unsupported type: {type(sequences)}")
 
 
 def read(buffer: io.TextIOBase) -> Generator[FastqEntry, None, None]:
