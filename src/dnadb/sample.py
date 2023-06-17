@@ -67,12 +67,15 @@ class SampleMappingEntryFactory:
         self.fasta_index_db = fasta_index_db
         self.abundance_map: dict[int, int] = {}
 
-    def add_entry(self, entry: FastaEntry, abundance: int = 1) -> 'SampleMappingEntryFactory':
-        index = self.fasta_index_db.fasta_id_to_index(entry.identifier)
+    def add_fasta_id(self, fasta_id: str, abundance: int = 1) -> 'SampleMappingEntryFactory':
+        index = self.fasta_index_db.fasta_id_to_index(fasta_id)
         if index not in self.abundance_map:
             self.abundance_map[index] = 0
         self.abundance_map[index] += abundance
         return self
+
+    def add_entry(self, entry: FastaEntry, abundance: int = 1) -> 'SampleMappingEntryFactory':
+        return self.add_fasta_id(entry.identifier, abundance)
 
     def add_entries(self, entries: Iterable[FastaEntry]) -> 'SampleMappingEntryFactory':
         for entry in entries:

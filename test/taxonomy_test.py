@@ -33,6 +33,9 @@ class TestTaxonomySplits(unittest.TestCase):
             taxonomy.split_taxonomy(self.taxonomy_entries[0].label),
             ("Bacteria",))
         self.assertEqual(
+            taxonomy.split_taxonomy(self.taxonomy_entries[0].label, keep_empty=True),
+            ("Bacteria", "", "", "", "", "", ""))
+        self.assertEqual(
             taxonomy.split_taxonomy(self.taxonomy_entries[6].label),
             ("Bacteria", "Proteobacteria", "Gammaproteobacteria", "Pseudomonadales",
              "Pseudomonadaceae", "Pseudomonas", "test_species"))
@@ -42,11 +45,20 @@ class TestTaxonomySplits(unittest.TestCase):
         Join the taxons to the maximum depth.
         """
         self.assertEqual(
-            taxonomy.join_taxonomy(taxonomy.split_taxonomy(self.taxonomy_entries[0].label)),
+            taxonomy.join_taxonomy(taxonomy.split_taxonomy(self.taxonomy_entries[0].label, keep_empty=True)),
             self.taxonomy_entries[0].label)
         self.assertEqual(
-            taxonomy.join_taxonomy(taxonomy.split_taxonomy(self.taxonomy_entries[6].label)),
+            taxonomy.join_taxonomy(taxonomy.split_taxonomy(self.taxonomy_entries[6].label, keep_empty=True)),
             self.taxonomy_entries[6].label)
+        self.assertEqual(
+            taxonomy.join_taxonomy(["Bacteria"]), "k__Bacteria"
+        )
+        self.assertEqual(
+            taxonomy.join_taxonomy(["Bacteria", ""]), "k__Bacteria; p__"
+        )
+        self.assertEqual(
+            taxonomy.join_taxonomy(["Bacteria"], depth=2), "k__Bacteria; p__"
+        )
 
 class TestTaxonomyReading(unittest.TestCase):
     def setUp(self):
@@ -322,6 +334,16 @@ class TestTaxonomyHierarchy(unittest.TestCase):
         self.hierarchy.add_entry(self.taxonomy_entries[3])
         self.assertIs(self.hierarchy.taxon_to_id_map, a)
         self.assertIs(self.hierarchy.id_to_taxon_map, b)
+
+    def test_taxon_id_map_order(self):
+        # Ensure that the taxons in each rank are grouped together.
+        for rank, taxon_group in enumerate(self.hierarchy.id_to_taxon_map[:-1]):
+            offset = 0
+            for parent in taxon_group:
+                j = 0
+                for j in range(len(parent.children)):
+                    self.assertIs(self.hierarchy.id_to_taxon_map[rank+1][offset+j].parent, parent)
+                offset += len(parent.children)
 
     def test_tokenize(self):
         tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label)

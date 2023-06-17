@@ -17,20 +17,21 @@ RANK_PREFIXES = ''.join(rank[0] for rank in RANKS).lower()
 
 # Utility Functions --------------------------------------------------------------------------------
 
-def split_taxonomy(taxonomy: str) -> Tuple[str, ...]:
+def split_taxonomy(taxonomy: str, keep_empty: bool = False) -> Tuple[str, ...]:
     """
     Split taxonomy label into a tuple
     """
-    return tuple(re.findall(r"\w__([^;]+)", taxonomy))
+    return tuple(re.findall(r"\w__([^;]*)" if keep_empty else r"\w__([^;]+)", taxonomy))
 
 
-def join_taxonomy(taxonomy: Union[Tuple[str, ...], List[str]]) -> str:
+def join_taxonomy(taxonomy: Union[Tuple[str, ...], List[str]], depth: Optional[int] = None) -> str:
     """
     Merge a taxonomy tuple into a string format
     """
-    depth = len(taxonomy)
+    if depth is None:
+        depth = len(taxonomy)
     assert depth >= 1 and depth <= len(RANKS), "Invalid taxonomy"
-    taxonomy = tuple(taxonomy) + ("",) * (len(RANKS) - depth)
+    taxonomy = tuple(taxonomy) + ("",)*(depth - len(taxonomy))
     return "; ".join([f"{RANK_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
 
 # Taxonomy TSV Utilities ---------------------------------------------------------------------------
@@ -299,7 +300,7 @@ class TaxonomyHierarchy:
         self.depth = depth
         self.taxon_tree_head = Taxon(-1, "_root_")
         self._taxon_to_id_map: Optional[Tuple[Dict[Taxon, int], ...]] = None
-        self._id_to_taxon_map: Optional[Tuple[Dict[int, Taxon], ...]] = None
+        self._id_to_taxon_map: Optional[Tuple[List[Taxon], ...]] = None
 
     def add_entries(self, entries: Iterable[TaxonomyEntry]):
         """
@@ -422,7 +423,7 @@ class TaxonomyHierarchy:
         Returns:
             str: The reduced taxonomy label.
         """
-        return join_taxonomy(self.reduce_taxons(split_taxonomy(taxonomy)))
+        return join_taxonomy(self.reduce_taxons(split_taxonomy(taxonomy)), depth=self.depth)
 
     def reduce_taxons(self, taxons: Tuple[str, ...]) -> Tuple[str, ...]:
         """
@@ -500,7 +501,7 @@ class TaxonomyHierarchy:
         Returns:
             str: The detokenized taxonomy label.
         """
-        return join_taxonomy(self.detokenize_taxons(taxon_tokens, include_missing))
+        return join_taxonomy(self.detokenize_taxons(taxon_tokens, include_missing), depth=self.depth)
 
     def detokenize_taxons(
         self,
@@ -570,15 +571,16 @@ class TaxonomyHierarchy:
         return self._taxon_to_id_map
 
     @property
-    def id_to_taxon_map(self) -> Tuple[Dict[int, Taxon], ...]:
+    def id_to_taxon_map(self) -> Tuple[List[Taxon], ...]:
         """
         A mapping of taxon IDs to Taxon instances.
         """
         if self._id_to_taxon_map is None:
-            self._id_to_taxon_map = tuple({} for _ in range(self.depth))
+            self._id_to_taxon_map = tuple([] for _ in range(self.depth))
             for taxon in self:
-                taxon_id = self.taxon_to_id_map[taxon.rank][taxon]
-                self._id_to_taxon_map[taxon.rank][taxon_id] = taxon
+                # taxon_id = self.taxon_to_id_map[taxon.rank][taxon]
+                # assert len(self._id_to_taxon_map[taxon.rank]) == taxon_id
+                self._id_to_taxon_map[taxon.rank].append(taxon)
         return self._id_to_taxon_map
 
     def __eq__(self, other: "TaxonomyHierarchy"):
@@ -594,14 +596,11 @@ class TaxonomyHierarchy:
         """
         Breadth-first sorted iteration over the taxonomy hierarchy.
         """
-        q: list[Taxon] = []
-        for child in self.taxon_tree_head:
-            heapq.heappush(q, child)
+        q: list[Taxon] = sorted(self.taxon_tree_head.children.values())
         while len(q) > 0:
-            taxon = heapq.heappop(q)
+            taxon = q.pop(0)
             yield taxon
-            for child in taxon:
-                heapq.heappush(q, child)
+            q += sorted(taxon.children.values())
 
 def entries(
     taxonomy: Union[io.TextIOBase, Iterable[TaxonomyEntry], str, Path]

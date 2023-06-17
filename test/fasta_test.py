@@ -78,7 +78,6 @@ class TestFastaDb(unittest.TestCase):
         self.assertEqual(self.db[1], self.fasta_entries[1])
 
     def test_get_sequence_by_id(self):
-        print("\n\n", self.fasta_entries, "\n\n")
         self.assertEqual(self.db["12345"], self.fasta_entries[0])
         self.assertEqual(self.db["12346"], self.fasta_entries[1])
 
