@@ -294,6 +294,11 @@ class TestTaxonomyIdMap(unittest.TestCase):
     def test_labels(self):
         self.assertEqual(list(self.taxonomy_id_map.labels()), list(self.taxonomy_db.labels())[:7])
 
+    def test_has_label(self):
+        for label in self.taxonomy_db.labels():
+            self.assertTrue(self.taxonomy_id_map.has_label(label))
+        self.assertFalse(self.taxonomy_id_map.has_label("k__Bacteria; p__Proteobacteria; c__XYZ; o__Acetobacterales; f__; g__; s__"))
+
     # id_to_label
     def test_id_to_label(self):
         self.assertEqual(self.taxonomy_id_map.id_to_label(0), self.taxonomy_entries[0].label)

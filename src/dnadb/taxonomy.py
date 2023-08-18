@@ -260,6 +260,12 @@ class TaxonomyIdMap:
         """
         yield from self.label_to_id_map
 
+    def has_label(self, label: str) -> bool:
+        """
+        Check if the ID map has a given taxonomy label.
+        """
+        return label in self.label_to_id_map
+
     def id_to_label(self, label_id: int) -> str:
         """
         Get the taxonomy label for a given label ID.
