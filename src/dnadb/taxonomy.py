@@ -254,6 +254,12 @@ class TaxonomyIdMap:
         for label in taxonomy_labels:
             self.add_taxonomy(label)
 
+    def labels(self) -> Generator[str, None, None]:
+        """
+        Get the taxonomy labels.
+        """
+        yield from self.label_to_id_map
+
     def id_to_label(self, label_id: int) -> str:
         """
         Get the taxonomy label for a given label ID.

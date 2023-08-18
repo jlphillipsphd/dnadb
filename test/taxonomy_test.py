@@ -291,6 +291,9 @@ class TestTaxonomyIdMap(unittest.TestCase):
     def test_create_taxonomy_id_map_from_db(self):
         self.assertEqual(len(self.taxonomy_id_map), 7)
 
+    def test_labels(self):
+        self.assertEqual(list(self.taxonomy_id_map.labels()), list(self.taxonomy_db.labels())[:7])
+
     # id_to_label
     def test_id_to_label(self):
         self.assertEqual(self.taxonomy_id_map.id_to_label(0), self.taxonomy_entries[0].label)
