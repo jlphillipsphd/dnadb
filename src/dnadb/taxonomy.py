@@ -233,8 +233,8 @@ class TaxonomyIdMap:
         return cls(chain(*(d.labels() for d in db)))
 
     def __init__(self, taxonomy_labels: Optional[Iterable[str]] = None):
-        self._id_to_label_map: list[str] = []
-        self._label_to_id_map: dict[str, int] = {}
+        self.id_to_label_map: list[str] = []
+        self.label_to_id_map: dict[str, int] = {}
         if taxonomy_labels:
             return self.add_taxonomies(taxonomy_labels)
 
@@ -242,10 +242,10 @@ class TaxonomyIdMap:
         """
         Add a taxonomy label to the ID map.
         """
-        if taxonomy_label in self._label_to_id_map:
+        if taxonomy_label in self.label_to_id_map:
             return
-        self._label_to_id_map[taxonomy_label] = len(self._label_to_id_map)
-        self._id_to_label_map.append(taxonomy_label)
+        self.label_to_id_map[taxonomy_label] = len(self.label_to_id_map)
+        self.id_to_label_map.append(taxonomy_label)
 
     def add_taxonomies(self, taxonomy_labels: Iterable[str]):
         """
@@ -258,19 +258,19 @@ class TaxonomyIdMap:
         """
         Get the taxonomy label for a given label ID.
         """
-        return self._id_to_label_map[label_id]
+        return self.id_to_label_map[label_id]
 
     def label_to_id(self, label: str) -> int:
         """
         Get the taxonomy label ID for a given label.
         """
-        return self._label_to_id_map[label]
+        return self.label_to_id_map[label]
 
     def __eq__(self, other: "TaxonomyIdMap"):
         """
         Check if two taxonomy ID maps are equal.
         """
-        return self._id_to_label_map == other._id_to_label_map
+        return self.id_to_label_map == other.id_to_label_map
 
     @overload
     def __getitem__(self, key: str) -> int:
@@ -286,13 +286,13 @@ class TaxonomyIdMap:
         return self.id_to_label(key)
 
     def __iter__(self) -> Iterable[str]:
-        return iter(self._label_to_id_map)
+        return iter(self.label_to_id_map)
 
     def __len__(self) -> int:
-        return len(self._id_to_label_map)
+        return len(self.id_to_label_map)
 
     def serialize(self) -> bytes:
-        return json.dumps(self._id_to_label_map).encode()
+        return json.dumps(self.id_to_label_map).encode()
 
     def display(self, max: Optional[int] = None):
         print(str(self))
@@ -301,7 +301,7 @@ class TaxonomyIdMap:
             return
         n = len(self) if max is None else min(len(self), max)
         spacing = int(np.log10(n)) + 1
-        for i, label in enumerate(self._id_to_label_map[:n]):
+        for i, label in enumerate(self.id_to_label_map[:n]):
             print(f"  {i:>{spacing}}: {label}")
 
     def __str__(self) -> str:
