@@ -152,16 +152,14 @@ def write_tax_strings(facc_species_tid_dict, prop_dict, outfile,
                       sp_label=False):
         vprint('Saving new fixed-rank SILVA taxonomy to file...')
         if sp_label:
-            for facc,taxinfo in facc_species_tid_dict.items():
+            for facc, taxinfo in facc_species_tid_dict.items():
                 tp = prop_dict[taxinfo[1]]
                 species_name = taxinfo[0]
-                clean_species_name = '; s__' + filter_characters(species_name)
-                nts = facc + '\t' + tp + clean_species_name + '\n'
-                #print(nts)
-                outfile.write(nts)
+                tp += '; s__' + filter_characters(species_name)
+                tp = tp.replace('unclassified', '')
+                outfile.write(facc + '\t' + tp + '\n')
         else:
-            for facc,taxinfo in facc_species_tid_dict.items():
+            for facc, taxinfo in facc_species_tid_dict.items():
                 tp = prop_dict[taxinfo[1]]
-                nts = facc + '\t' + tp  + '\n'
-                #print(nts)
-                outfile.write(nts)
+                tp = tp.replace('unclassified', '')
+                outfile.write(facc + '\t' + tp + '\n')
