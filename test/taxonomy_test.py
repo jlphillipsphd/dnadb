@@ -267,6 +267,50 @@ class TestTaxonomyDb(unittest.TestCase):
         self.assertEqual(self.taxonomy_db.label_to_index(self.taxonomy_entries[7].label), 4) # same label
 
 
+class TestTaxonomyIdMap(unittest.TestCase):
+    def setUp(self):
+        """
+        Create a taxonomy database
+        """
+        taxonomy_file = io.StringIO(TAXONOMY_SAMPLE)
+        with taxonomy.TaxonomyDbFactory("/tmp/test.tax.db") as factory:
+            self.taxonomy_entries = list(taxonomy.entries(taxonomy_file))
+            factory.write_entries(self.taxonomy_entries)
+        self.taxonomy_db = taxonomy.TaxonomyDb(factory.path)
+        self.taxonomy_id_map = taxonomy.TaxonomyIdMap.from_db(self.taxonomy_db)
+
+    def tearDown(self):
+        """
+        Remove the taxonomy database.
+        """
+        self.taxonomy_db.close()
+        for f in self.taxonomy_db.path.iterdir():
+            f.unlink()
+        self.taxonomy_db.path.rmdir()
+
+    def test_create_taxonomy_id_map_from_db(self):
+        self.assertEqual(len(self.taxonomy_id_map), 7)
+
+    # id_to_label
+    def test_id_to_label(self):
+        self.assertEqual(self.taxonomy_id_map.id_to_label(0), self.taxonomy_entries[0].label)
+        self.assertEqual(self.taxonomy_id_map[4], self.taxonomy_entries[4].label)
+
+    # label_to_id
+    def test_label_to_id(self):
+        self.assertEqual(self.taxonomy_id_map.label_to_id(self.taxonomy_entries[0].label), 0)
+        self.assertEqual(self.taxonomy_id_map[self.taxonomy_entries[4].label], 4)
+        self.assertEqual(self.taxonomy_id_map.label_to_id(self.taxonomy_entries[7].label), 4)
+
+    # serialize
+    def test_serialize(self):
+        self.assertIsInstance(self.taxonomy_id_map.serialize(), bytes)
+
+    # deserialize
+    def test_deserialize(self):
+        deserialized = taxonomy.TaxonomyIdMap.deserialize(self.taxonomy_id_map.serialize())
+        self.assertEqual(deserialized, self.taxonomy_id_map)
+
 class TestTaxon(unittest.TestCase):
     def setUp(self):
         self.a = taxonomy.Taxon(rank=0, name="A", parent=None)

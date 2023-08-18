@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field, replace
-import heapq
 import io
+from itertools import chain
 import json
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
 import re
-from typing import Dict, Generator, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Generator, Iterable, List, Optional, overload, Tuple, Union
 
 from .db import DbFactory, DbWrapper
 from .types import int_t
@@ -125,6 +125,7 @@ class TaxonomyDbFactory(DbFactory):
         self.write("length", self.num_entries.tobytes())
         super().before_close()
 
+
 class TaxonomyDb(DbWrapper):
     __slots__ = ("length",)
 
@@ -207,6 +208,107 @@ class TaxonomyDb(DbWrapper):
     def __iter__(self):
         for i in range(len(self)):
             yield self.db[str(i)].decode()
+
+# Taxonomy ID Map ----------------------------------------------------------------------------------
+
+class TaxonomyIdMap:
+    """
+    A bidirectional map between taxonomy labels and integer IDs.
+    """
+    @classmethod
+    def deserialize(cls, id_map_json_bytes: Union[str, bytes, bytearray]) -> "TaxonomyIdMap":
+        """
+        Deserialize a taxonomy ID map from a bytes object.
+        """
+        id_map = json.loads(id_map_json_bytes)
+        return cls(id_map)
+
+    @classmethod
+    def from_db(cls, db: Union[TaxonomyDb, Iterable[TaxonomyDb]]) -> "TaxonomyIdMap":
+        """
+        Create a taxonomy ID map from the given taxonomy database(s).
+        """
+        if isinstance(db, TaxonomyDb):
+            db = [db]
+        return cls(chain(*(d.labels() for d in db)))
+
+    def __init__(self, taxonomy_labels: Optional[Iterable[str]] = None):
+        self._id_to_label_map: list[str] = []
+        self._label_to_id_map: dict[str, int] = {}
+        if taxonomy_labels:
+            return self.add_taxonomies(taxonomy_labels)
+
+    def add_taxonomy(self, taxonomy_label: str):
+        """
+        Add a taxonomy label to the ID map.
+        """
+        if taxonomy_label in self._label_to_id_map:
+            return
+        self._label_to_id_map[taxonomy_label] = len(self._label_to_id_map)
+        self._id_to_label_map.append(taxonomy_label)
+
+    def add_taxonomies(self, taxonomy_labels: Iterable[str]):
+        """
+        Add a set of taxonomy labels
+        """
+        for label in taxonomy_labels:
+            self.add_taxonomy(label)
+
+    def id_to_label(self, label_id: int) -> str:
+        """
+        Get the taxonomy label for a given label ID.
+        """
+        return self._id_to_label_map[label_id]
+
+    def label_to_id(self, label: str) -> int:
+        """
+        Get the taxonomy label ID for a given label.
+        """
+        return self._label_to_id_map[label]
+
+    def __eq__(self, other: "TaxonomyIdMap"):
+        """
+        Check if two taxonomy ID maps are equal.
+        """
+        return self._id_to_label_map == other._id_to_label_map
+
+    @overload
+    def __getitem__(self, key: str) -> int:
+        ...
+
+    @overload
+    def __getitem__(self, key: int) -> str:
+        ...
+
+    def __getitem__(self, key: Union[str, int]) -> Union[str, int]:
+        if isinstance(key, str):
+            return self.label_to_id(key)
+        return self.id_to_label(key)
+
+    def __iter__(self) -> Iterable[str]:
+        return iter(self._label_to_id_map)
+
+    def __len__(self) -> int:
+        return len(self._id_to_label_map)
+
+    def serialize(self) -> bytes:
+        return json.dumps(self._id_to_label_map).encode()
+
+    def display(self, max: Optional[int] = None):
+        print(str(self))
+        if len(self) == 0:
+            print("  Empty")
+            return
+        n = len(self) if max is None else min(len(self), max)
+        spacing = int(np.log10(n)) + 1
+        for i, label in enumerate(self._id_to_label_map[:n]):
+            print(f"  {i:>{spacing}}: {label}")
+
+    def __str__(self) -> str:
+        return f"TaxonomyIdMap({len(self)})"
+
+    def __repr__(self) -> str:
+        return str(self)
 
 # Taxonomy Hierarchy -------------------------------------------------------------------------------
 
