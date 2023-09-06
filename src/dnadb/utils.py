@@ -45,6 +45,16 @@ def decompress(path: Union[str, Path]):
 
 def open_file(path: Union[str, Path], mode: str = "r") -> io.TextIOWrapper:
     """
-    Open a file wihtout worrying about compression
+    Open a file without worrying about compression.
     """
     return cast(io.TextIOWrapper, skbio_open(str(path), mode))
+
+
+def sort_dict(d: dict):
+    """
+    Sort a dictionary in place.
+    """
+    for key in sorted(d):
+        value = d[key]
+        del d[key]
+        d[key] = value

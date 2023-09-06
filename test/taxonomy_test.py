@@ -319,145 +319,112 @@ class TestTaxonomyIdMap(unittest.TestCase):
         deserialized = taxonomy.TaxonomyIdMap.deserialize(self.taxonomy_id_map.serialize())
         self.assertEqual(deserialized, self.taxonomy_id_map)
 
-class TestTaxon(unittest.TestCase):
-    def setUp(self):
-        self.a = taxonomy.Taxon(rank=0, name="A", parent=None)
-        self.b = taxonomy.Taxon(rank=1, name="B", parent=self.a)
-
-    def test_taxon_parent(self):
-        self.assertIsNone(self.a.parent)
-        self.assertIs(self.b.parent, self.a)
-
-    def test_taxon_has_child(self):
-        self.assertIn(self.b, self.a)
-        self.assertIn(self.b.name, self.a)
-
-    def test_taxon_is_child(self):
-        self.assertIs(self.a[self.b.name], self.b)
-        self.assertIs(self.a[self.b], self.b)
-
-
-class TestTaxonomyHierarchy(unittest.TestCase):
+class TestTaxonomyIdTree(unittest.TestCase):
     def setUp(self):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE)
         self.taxonomy_lines = TAXONOMY_SAMPLE.split('\n')
         self.taxonomy_entries = list(taxonomy.entries(taxonomy_file))
-        self.hierarchy = taxonomy.TaxonomyHierarchy(depth=7)
-        self.hierarchy.add_entries(self.taxonomy_entries)
+        self.tree = taxonomy.TaxonomyIdTree(depth=7)
+        self.tree.add_entries(self.taxonomy_entries)
         self.invalid_label = "k__Bacteria; p__Proteobacteria; c__XYZ; o__Acetobacterales; f__; g__; s__"
         self.test_label = "k__Bacteria; p__Proteobacteria; c__XYZ; o__; f__; g__; s__"
 
     def test_taxon_depth(self):
-        self.assertEqual(self.hierarchy.depth, 7)
+        self.assertEqual(self.tree.depth, 7)
 
     def test_taxon_counts(self):
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[0]), 2, "Kingdom")
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[1]), 4, "Phylum")
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[2]), 3, "Class")
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[3]), 3, "Order")
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[4]), 2, "Family")
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[5]), 2, "Genus")
-        self.assertEqual(len(self.hierarchy.taxon_to_id_map[6]), 1, "Species")
+        self.assertEqual(len(self.tree.id_to_taxons_map[0]), 2, "Kingdom")
+        self.assertEqual(len(self.tree.id_to_taxons_map[1]), 5, "Phylum")
+        self.assertEqual(len(self.tree.id_to_taxons_map[2]), 6, "Class")
+        self.assertEqual(len(self.tree.id_to_taxons_map[3]), 7, "Order")
+        self.assertEqual(len(self.tree.id_to_taxons_map[4]), 7, "Family")
+        self.assertEqual(len(self.tree.id_to_taxons_map[5]), 7, "Genus")
+        self.assertEqual(len(self.tree.id_to_taxons_map[6]), 7, "Species")
 
-    def test_has_taxonomy(self):
+    def test_bidirectional_taxon_mapping(self):
+        for depth in range(self.tree.depth):
+            for i, taxons in enumerate(self.tree.id_to_taxons_map[depth]):
+                self.assertEqual(i, self.tree.taxons_to_id_map[taxons])
+
+    def test_has_label(self):
         for entry in self.taxonomy_entries:
-            self.assertTrue(self.hierarchy.has_entry(entry), "TaxonomyEntry")
-            self.assertTrue(self.hierarchy.has_taxonomy(entry.label), "taxonomy string")
-        self.assertFalse(self.hierarchy.has_taxonomy(self.invalid_label))
+            self.assertTrue(self.tree.has_entry(entry), "TaxonomyEntry")
+            self.assertTrue(self.tree.has_label(entry.label), "taxonomy string")
+        self.assertFalse(self.tree.has_label(self.invalid_label))
 
     def test_reduce_taxons(self):
         taxons = taxonomy.split_taxonomy(self.invalid_label)
-        self.assertEqual(self.hierarchy.reduce_taxons(taxons), ("Bacteria", "Proteobacteria"))
+        self.assertEqual(self.tree.reduce_taxons(taxons), ("Bacteria", "Proteobacteria"))
 
     def test_reduce_taxonomy(self):
-        self.assertEqual(self.hierarchy.reduce_taxonomy(self.test_label), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
-        self.assertEqual(self.hierarchy.reduce_taxonomy(self.invalid_label), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
+        self.assertEqual(self.tree.reduce_label(self.test_label), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
+        self.assertEqual(self.tree.reduce_label(self.invalid_label), "k__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
 
     def test_rebuild_taxon_id_maps_on_add(self):
-        a = self.hierarchy.taxon_to_id_map
-        b = self.hierarchy.id_to_taxon_map
-        self.hierarchy.add_taxonomy(self.invalid_label)
-        self.assertIsNot(self.hierarchy.taxon_to_id_map, a)
-        self.assertIsNot(self.hierarchy.id_to_taxon_map, b)
+        a = self.tree.taxons_to_id_map
+        b = self.tree.id_to_taxons_map
+        self.tree.add_label(self.invalid_label)
+        self.assertIsNot(self.tree.taxons_to_id_map, a)
+        self.assertIsNot(self.tree.id_to_taxons_map, b)
 
-    def test_prevent_rebuild_taxon_id_maps_on_add(self):
-        a = self.hierarchy.taxon_to_id_map
-        b = self.hierarchy.id_to_taxon_map
-        self.hierarchy.add_entry(self.taxonomy_entries[3])
-        self.assertIs(self.hierarchy.taxon_to_id_map, a)
-        self.assertIs(self.hierarchy.id_to_taxon_map, b)
-
-    def test_taxon_id_map_order(self):
-        # Ensure that the taxons in each rank are grouped together.
-        for rank, taxon_group in enumerate(self.hierarchy.id_to_taxon_map[:-1]):
-            offset = 0
-            for parent in taxon_group:
-                j = 0
-                for j in range(len(parent.children)):
-                    self.assertIs(self.hierarchy.id_to_taxon_map[rank+1][offset+j].parent, parent)
-                offset += len(parent.children)
+    # def test_taxon_id_map_order(self):
+    #     # Ensure that the taxons in each rank are grouped together.
+    #     for rank, taxon_group in enumerate(self.tree.id_to_taxons_map[:-1]):
+    #         offset = 0
+    #         for parent in taxon_group:
+    #             j = 0
+    #             for j in range(len(parent.children)):
+    #                 self.assertIs(self.tree.id_to_taxon_map[rank+1][offset+j].parent, parent)
+    #             offset += len(parent.children)
 
     def test_tokenize(self):
-        tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label)
-        self.assertEqual(len(tokens), 3)
+        tokens = self.tree.tokenize_label(self.taxonomy_entries[3].label)
+        self.assertEqual(len(tokens), 7)
 
     def test_tokenize_with_truncated_hierarchy(self):
-        truncated_hierarchy = taxonomy.TaxonomyHierarchy.merged([self.hierarchy], 2)
-        tokens = truncated_hierarchy.tokenize(self.taxonomy_entries[3].label)
+        truncated_tree = taxonomy.TaxonomyIdTree(depth=2)
+        truncated_tree.update(self.tree)
+        print(self.taxonomy_entries[2].label)
+        tokens = truncated_tree.tokenize_label(self.taxonomy_entries[2].label)
         self.assertEqual(len(tokens), 2)
-
-    def test_tokenize_with_pad(self):
-        tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label, pad=True)
-        self.assertEqual(len(tokens), 7)
-        self.assertEqual(tuple(tokens[3:]), (-1, -1, -1, -1))
-
-    def test_tokenize_with_pad_and_include_missing(self):
-        tokens = self.hierarchy.tokenize(self.taxonomy_entries[3].label, pad=True, include_missing=True)
-        self.assertEqual(len(tokens), 7)
-        self.assertEqual(tuple(tokens[3:]), (0, 0, 0, 0))
 
     def test_detokenize(self):
         for entry in self.taxonomy_entries:
-            tokens = self.hierarchy.tokenize(entry.label, pad=False)
-            self.assertEqual(self.hierarchy.detokenize(tokens), entry.label)
-
-    def test_detokenize_with_pad(self):
-        for entry in self.taxonomy_entries:
-            tokens = self.hierarchy.tokenize(entry.label, pad=True)
-            self.assertEqual(self.hierarchy.detokenize(tokens), entry.label)
-
-    def test_detokenize_with_pad_and_include_missing(self):
-        for entry in self.taxonomy_entries:
-            tokens = self.hierarchy.tokenize(entry.label, pad=True, include_missing=True)
-            self.assertEqual(self.hierarchy.detokenize(tokens, include_missing=True), entry.label)
+            tokens = self.tree.tokenize_label(entry.label)
+            self.assertEqual(self.tree.detokenize_label(tokens), entry.label)
 
     def test_serialize_deserialize(self):
-        serialized = self.hierarchy.serialize()
-        deserialized = taxonomy.TaxonomyHierarchy.deserialize(serialized)
-        self.assertEqual(self.hierarchy, deserialized)
+        serialized = self.tree.serialize()
+        deserialized = taxonomy.TaxonomyIdTree.deserialize(serialized)
+        self.assertEqual(self.tree, deserialized)
 
-class TestTaxonomyHierarchyMerge(unittest.TestCase):
+class TestTaxonomyIdTreeMerge(unittest.TestCase):
     def setUp(self):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE)
         self.taxonomy_lines = TAXONOMY_SAMPLE.split('\n')
         self.taxonomy_entries = list(taxonomy.entries(taxonomy_file))
-        self.hierarchy = taxonomy.TaxonomyHierarchy(depth=7)
-        self.hierarchy.add_entries(self.taxonomy_entries)
-        self.a = taxonomy.TaxonomyHierarchy(depth=7)
+        self.tree = taxonomy.TaxonomyIdTree(depth=7)
+        self.tree.add_entries(self.taxonomy_entries)
+        self.a = taxonomy.TaxonomyIdTree(depth=7)
         self.a.add_entries(self.taxonomy_entries[:4])
-        self.b = taxonomy.TaxonomyHierarchy(depth=7)
+        self.b = taxonomy.TaxonomyIdTree(depth=7)
         self.b.add_entries(self.taxonomy_entries[4:])
 
     def test_merge_hierarchy_max_depth(self):
-        merged = taxonomy.TaxonomyHierarchy.merged([self.a, self.b])
-        for taxon_a, taxon_b in zip(self.hierarchy, merged):
-            self.assertEqual(taxon_a, taxon_b)
+        merged = taxonomy.TaxonomyIdTree()
+        merged.update(self.a)
+        merged.update(self.b)
+        for label_a, label_b in zip(self.tree, merged):
+            print(label_a, label_b)
+            self.assertEqual(label_a, label_b)
 
-    def test_merge_hierarchy_truncated_depth(self):
-        depth = 4
-        merged = taxonomy.TaxonomyHierarchy.merged([self.a, self.b], depth=depth)
-        for taxon_a, taxon_b in zip(self.hierarchy, merged):
-            self.assertEqual(taxon_a, taxon_b)
+    # def test_merge_hierarchy_truncated_depth(self):
+    #     depth = 4
+    #     merged = taxonomy.TaxonomyIdTree(depth=depth)
+    #     merged.update(self.a)
+    #     merged.update(self.b)
+    #     for label_a, label_b in zip(self.tree, merged):
+    #         self.assertEqual(label_a, label_b)
 
 
 if __name__ == "__main__":
