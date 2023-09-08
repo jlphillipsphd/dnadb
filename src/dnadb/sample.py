@@ -68,6 +68,8 @@ class SampleMappingEntryFactory:
         self.abundance_map: dict[int, int] = {}
 
     def add_fasta_id(self, fasta_id: str, abundance: int = 1) -> 'SampleMappingEntryFactory':
+        if abundance == 0:
+            return self
         index = self.fasta_index_db.fasta_id_to_index(fasta_id)
         if index not in self.abundance_map:
             self.abundance_map[index] = 0
@@ -190,6 +192,9 @@ class FastaSample(SampleInterface):
     def __iter__(self) -> Generator[FastaEntry, None, None]:
         return iter(self.fasta_db)
 
+    def __repr__(self):
+        return f"FastaSample: {self.name}"
+
 
 class FastqSample(SampleInterface):
     def __init__(self, fastq_db: FastqDb, name: Optional[str] = None):
@@ -220,6 +225,9 @@ class FastqSample(SampleInterface):
 
     def __iter__(self):
         return iter(self.fastq_db)
+
+    def __repr__(self):
+        return f"FastqSample: {self.name}"
 
 
 class DemultiplexedFastaSample(FastaSample):
@@ -269,6 +277,9 @@ class DemultiplexedFastaSample(FastaSample):
             entry = self.fasta_db[fasta_id]
             for _ in range(abundance):
                 yield entry
+
+    def __repr__(self):
+        return f"DemultiplexedFastaSample: {self.name}"
 
 # Utility functions for loading/wrapping FASTA/FASTQ databases with sample interfaces.
 
