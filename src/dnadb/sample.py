@@ -1,5 +1,6 @@
 import abc
 from dataclasses import dataclass, field
+import enum
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
@@ -137,14 +138,21 @@ class SampleMappingDb(DbWrapper):
             yield self[i]
 
 
+class SampleMode(enum.Enum):
+    Natural = enum.auto()
+    PresenceAbsence = enum.auto()
+
+
 class SampleInterface(abc.ABC):
-    def __init__(self, name: str):
+    def __init__(self, name: str, sample_mode: SampleMode = SampleMode.Natural):
         self.name = name
+        self.sample_mode = sample_mode
 
     @abc.abstractmethod
     def sample(
         self,
         n: int,
+        replace: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ) -> Generator[AbstractSequenceWrapper, None, None]:
         raise NotImplementedError()
@@ -163,8 +171,13 @@ class SampleInterface(abc.ABC):
 
 
 class FastaSample(SampleInterface):
-    def __init__(self, fasta_db: FastaDb, name: Optional[str] = None):
-        super().__init__(name or fasta_db.path.name)
+    def __init__(
+        self,
+        fasta_db: FastaDb,
+        name: Optional[str] = None,
+        sample_mode: SampleMode = SampleMode.Natural
+    ):
+        super().__init__(name or fasta_db.path.name, sample_mode)
         self.fasta_db = fasta_db
 
     def sample(
@@ -197,8 +210,13 @@ class FastaSample(SampleInterface):
 
 
 class FastqSample(SampleInterface):
-    def __init__(self, fastq_db: FastqDb, name: Optional[str] = None):
-        super().__init__(name or fastq_db.path.name)
+    def __init__(
+        self,
+        fastq_db: FastqDb,
+        name: Optional[str] = None,
+        sample_mode: SampleMode = SampleMode.Natural
+    ):
+        super().__init__(name or fastq_db.path.name, sample_mode)
         self.fastq_db = fastq_db
 
     def sample(
@@ -231,8 +249,13 @@ class FastqSample(SampleInterface):
 
 
 class DemultiplexedFastaSample(FastaSample):
-    def __init__(self, fasta_db: FastaDb, sample_mapping: SampleMappingEntry):
-        super().__init__(fasta_db, sample_mapping.name)
+    def __init__(
+        self,
+        fasta_db: FastaDb,
+        sample_mapping: SampleMappingEntry,
+        sample_mode: SampleMode = SampleMode.Natural
+    ):
+        super().__init__(fasta_db, sample_mapping.name, sample_mode)
         self.sample_mapping = sample_mapping
         self.cumulative_abundance = np.cumsum(self.sample_mapping.abundances)
 
@@ -245,7 +268,9 @@ class DemultiplexedFastaSample(FastaSample):
         """
         Sample random entries from the FASTA database according to the abundance distribution.
         """
-        p = self.sample_mapping.abundances / self.sample_mapping.abundances.sum()
+        p = None
+        if self.sample_mode == SampleMode.Natural:
+            p = self.sample_mapping.abundances / self.sample_mapping.abundances.sum()
         indices = rng.choice(len(self.sample_mapping), size=n, replace=replace, p=p)
         indices, counts = np.unique(indices, return_counts=True)
         for index, count in zip(indices, counts):
@@ -304,7 +329,8 @@ def load_fastq(
 def load_multiplexed_fasta(
     fasta_db_or_path: Union[FastaDb, Union[str, Path]],
     sample_mapping_db_or_path: Union[SampleMappingDb, Union[str, Path]],
-    fasta_index_db_or_path: Optional[Union[FastaIndexDb, Union[str, Path]]] = None
+    fasta_index_db_or_path: Optional[Union[FastaIndexDb, Union[str, Path]]] = None,
+    sample_mode: SampleMode = SampleMode.Natural
 ) -> Tuple[DemultiplexedFastaSample, ...]:
     if not isinstance(fasta_db_or_path, FastaDb):
         fasta_db_or_path = FastaDb(fasta_db_or_path)
@@ -319,4 +345,6 @@ def load_multiplexed_fasta(
             sample_mapping_db_or_path,
             fasta_index_db_or_path)
     sample_entries = sorted(iter(sample_mapping_db_or_path))
-    return tuple(DemultiplexedFastaSample(fasta_db_or_path, entry) for entry in sample_entries)
+    return tuple(
+        DemultiplexedFastaSample(fasta_db_or_path, entry, sample_mode)
+        for entry in sample_entries)
