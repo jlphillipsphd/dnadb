@@ -1,7 +1,7 @@
+import gzip
 import io
 from pathlib import Path
 import requests
-from skbio.io.util import open as skbio_open
 import subprocess
 from tqdm.auto import tqdm
 from typing import cast, Union
@@ -47,7 +47,14 @@ def open_file(path: Union[str, Path], mode: str = "r") -> io.TextIOWrapper:
     """
     Open a file without worrying about compression.
     """
-    return cast(io.TextIOWrapper, skbio_open(str(path), mode))
+    path = Path(path)
+    if path.suffix == ".gz":
+        if mode == 'r':
+            mode = 'rt'
+        elif mode == 'w':
+            mode = 'wt'
+        return cast(io.TextIOWrapper, gzip.open(path, mode))
+    return cast(io.TextIOWrapper, open(path, mode))
 
 
 def sort_dict(d: dict):
