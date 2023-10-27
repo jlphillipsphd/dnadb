@@ -326,7 +326,7 @@ class TaxonomyIdMap:
 
 class TaxonomyIdTree:
     @classmethod
-    def deserialize(cls, taxonomy_id_tree_bytes: str|bytes):
+    def deserialize(cls, taxonomy_id_tree_bytes: Union[str, bytes]):
         deserialized = json.loads(taxonomy_id_tree_bytes)
         tree = cls(deserialized["depth"], deserialized["pad"])
         tree.tree = deserialized["tree"]
@@ -345,8 +345,8 @@ class TaxonomyIdTree:
         self.depth = depth
         self.pad = pad
         self.tree = {}
-        self._id_to_taxons_map: Tuple[List[Tuple[str, ...]], ...]|None
-        self._taxons_to_id_map: Dict[Tuple[str, ...], int]|None
+        self._id_to_taxons_map: Union[Tuple[List[Tuple[str, ...]], ...], None]
+        self._taxons_to_id_map: Union[Dict[Tuple[str, ...], int], None]
         self._mark_dirty()
 
     def add_taxons(self, taxons: Tuple[str, ...]):

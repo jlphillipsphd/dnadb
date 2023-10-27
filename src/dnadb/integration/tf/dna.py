@@ -1,6 +1,7 @@
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
+from typing import Optional
 
 from ... import dna
 
@@ -10,7 +11,36 @@ IUPAC_AUGMENT_LOOKUP_TABLE = tf.constant(dna.IUPAC_AUGMENT_LOOKUP_TABLE, dtype=t
 
 # DNA Sequence Encoding/Decoding -------------------------------------------------------------------
 
-def encode(sequences: str|npt.NDArray[np.str_]|tf.Tensor) -> tf.Tensor:
+def encode(
+    sequences: str|bytes|npt.NDArray[np.str_]|tf.Tensor,
+    kmer: Optional[int|tf.Tensor] = 1,
+    ambiguous_bases: bool = False,
+    augment_ambiguous_bases: bool = True
+) -> tf.Tensor:
+    """
+    Encode the given DNA sequences.
+    """
+    result = _encode_bases(sequences)
+    if ambiguous_bases and augment_ambiguous_bases:
+        result = augment_ambiguous_bases(result)
+    if kmer > 1:
+        result = encode_kmers(result, kmer, ambiguous_bases)
+    return result
+
+
+def decode(
+    sequences: str|bytes|npt.NDArray[np.str_]|tf.Tensor,
+    kmer: Optional[int|tf.Tensor] = 1,
+    ambiguous_bases: bool = False
+) -> tf.Tensor:
+    """
+    Decode the given DNA sequences.
+    """
+    if kmer > 1:
+        sequences = decode_kmers(ambiguous_bases)
+    return _decode_bases(sequences)
+
+def _encode_bases(sequences: str|bytes|npt.NDArray[np.str_]|tf.Tensor) -> tf.Tensor:
     """
     Encode a DNA sequence into an integer vector representation.
     """
@@ -18,7 +48,7 @@ def encode(sequences: str|npt.NDArray[np.str_]|tf.Tensor) -> tf.Tensor:
     return tf.gather(BASE_LOOKUP_TABLE, ascii - 65)
 
 
-def decode(sequences: tf.Tensor) -> str:
+def _decode_bases(sequences: tf.Tensor) -> tf.Tensor:
     """
     Decode a DNA sequence integer vector representation into a string of bases.
     """
@@ -26,7 +56,7 @@ def decode(sequences: tf.Tensor) -> str:
     return tf.strings.unicode_encode(ascii, output_encoding="UTF-8")
 
 
-def encode_kmers(
+def _encode_kmers(
     sequences: tf.Tensor,
     kmer: int|tf.Tensor,
     ambiguous_bases: bool = False
@@ -45,7 +75,7 @@ def encode_kmers(
         tf.concat((original_shape[:-1], (sequence_length - kmer + 1,)), axis=0))
 
 
-def decode_kmers(
+def _decode_kmers(
     kmer_sequences: tf.Tensor,
     kmer: int|tf.Tensor,
     ambiguous_bases: bool = False
@@ -62,36 +92,11 @@ def decode_kmers(
     ], axis=-1)
 
 
-# def augment_ambiguous_bases(
-#     sequence: str,
-#     rng: np.random.Generator = np.random.default_rng()
-# ) -> str:
-#     """
-#     Replace the ambiguous bases in a DNA sequence at random with a valid concrete base.
-#     """
-#     return decode_sequence(replace_ambiguous_encoded_bases(encode_sequence(sequence), rng))
-
-
-# def replace_ambiguous_encoded_bases(
-#     encoded_sequences: npt.NDArray[np.uint8],
-#     rng: np.random.Generator = np.random.default_rng()
-# ) -> npt.NDArray[np.uint8]:
-#     """
-#     Replace the ambiguous bases in an encoded DNA sequence at random with a valid concrete base.
-#     """
-#     augment_indices = rng.integers(0, 12, size=encoded_sequences.shape)
-#     return IUPAC_AUGMENT_LOOKUP_TABLE[encoded_sequences, augment_indices]
-
-
-# def to_rna(dna_sequence: str) -> str:
-#     """
-#     Convert an RNA sequence to DNA.
-#     """
-#     return dna_sequence.replace('T', 'U')
-
-
-# def to_dna(rna_sequence: str) -> str:
-#     """
-#     Convert a DNA sequence to RNA.
-#     """
-#     return rna_sequence.replace('U', 'T')
+def _augment_ambiguous_bases(sequences: tf.Tensor):
+    sequences = tf.expand_dims(sequences, -1)
+    return tf.gather_nd(
+        IUPAC_AUGMENT_LOOKUP_TABLE,
+        tf.concat((
+            sequences,
+            tf.random.uniform(tf.shape(sequences), minval=0, maxval=len(dna.ALL_BASES), dtype=tf.int32)),
+            axis=-1))

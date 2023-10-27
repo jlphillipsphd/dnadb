@@ -8,7 +8,7 @@ T = TypeVar("T")
 
 class DbFactory:
     """
-    A factory for creating LMDB-backed databases of FASTA entries.
+    A wrapper around lmdbm.Lmdb that allows for buffered writes.
     """
     def __init__(self, path: Union[str, Path], chunk_size: int_t = 10000):
         self.path = Path(path)
