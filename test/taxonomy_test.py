@@ -384,7 +384,6 @@ class TestTaxonomyIdTree(unittest.TestCase):
     def test_tokenize_with_truncated_hierarchy(self):
         truncated_tree = taxonomy.TaxonomyIdTree(depth=2)
         truncated_tree.update(self.tree)
-        print(self.taxonomy_entries[2].label)
         tokens = truncated_tree.tokenize_label(self.taxonomy_entries[2].label)
         self.assertEqual(len(tokens), 2)
 
@@ -415,7 +414,6 @@ class TestTaxonomyIdTreeMerge(unittest.TestCase):
         merged.update(self.a)
         merged.update(self.b)
         for label_a, label_b in zip(self.tree, merged):
-            print(label_a, label_b)
             self.assertEqual(label_a, label_b)
 
     # def test_merge_hierarchy_truncated_depth(self):
