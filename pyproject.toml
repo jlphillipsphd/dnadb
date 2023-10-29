@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dnadb"
-version = "0.10.0"
+version = "0.11.0"
 authors = [
   { name="David Ludwig", email="davidludwigii@gmail.com" },
 ]
@@ -21,6 +21,9 @@ dependencies = [
   "lmdbm-lockable >= 0.0.5",
   "sortedcontainers >= 2.4.0"
 ]
+
+[project.scripts]
+dnadb = "dnadb.cli:main"
 
 [project.urls]
 "Homepage" = "https://github.com/DLii-Research/dnadb"

@@ -6,7 +6,7 @@ import numpy as np
 import numpy.typing as npt
 from pathlib import Path
 import re
-from typing import Dict, Generator, Iterable, List, Optional, overload, Tuple, Union
+from typing import Dict, Generator, Iterable, List, Literal, Optional, overload, Tuple, Union
 
 from .db import DbFactory, DbWrapper
 from .types import int_t
@@ -16,6 +16,13 @@ RANKS = ("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
 RANK_PREFIXES = ''.join(rank[0] for rank in RANKS).lower()
 
 # Utility Functions --------------------------------------------------------------------------------
+
+def is_taxonomy(taxonomy: str) -> bool:
+    """
+    Check if a string is a valid taxonomy label.
+    """
+    return bool(re.match(r"^\w__[^;]+(;\s*\w__[^;]+)*$", taxonomy))
+
 
 def split_taxonomy(taxonomy: str, keep_empty: bool = False) -> Tuple[str, ...]:
     """
@@ -593,28 +600,32 @@ class TaxonomyIdTree:
 
 def entries(
     taxonomy: Union[io.TextIOBase, Iterable[TaxonomyEntry], str, Path],
-    has_header: bool = False
+    header: bool|Literal["auto"] = "auto"
 ) -> Iterable[TaxonomyEntry]:
     """
     Create an Iterable over a taxonomy file or iterable of taxonomy entries.
     """
     if isinstance(taxonomy, (str, Path)):
         with open_file(taxonomy, 'r') as buffer:
-            yield from read(buffer, has_header=has_header)
+            yield from read(buffer, header=header)
     elif isinstance(taxonomy, io.TextIOBase):
-        yield from read(taxonomy, has_header=has_header)
-    elif has_header:
+        yield from read(taxonomy, header=header)
+    elif header:
         yield from taxonomy[1:]
     else:
         yield from taxonomy
 
 
-def read(buffer: io.TextIOBase, has_header: bool) -> Generator[TaxonomyEntry, None, None]:
+def read(buffer: io.TextIOBase, header: bool|Literal["auto"]) -> Generator[TaxonomyEntry, None, None]:
     """
     Read taxonomies from a tab-separated file (TSV)
     """
     iterator = iter(buffer)
-    if has_header:
+    if header == "auto":
+        identifier, taxonomy = next(iterator).strip().split('\t')
+        if is_taxonomy(taxonomy):
+            yield TaxonomyEntry(identifier, taxonomy)
+    elif header:
         next(iterator)
     for line in iterator:
         identifier, taxonomy = line.rstrip().split('\t')
