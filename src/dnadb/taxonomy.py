@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 import io
 from itertools import chain
 import json
@@ -12,7 +12,7 @@ from .db import DbFactory, DbWrapper
 from .types import int_t
 from .utils import open_file, sort_dict
 
-RANKS = ("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+RANKS = ("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
 RANK_PREFIXES = ''.join(rank[0] for rank in RANKS).lower()
 
 # Utility Functions --------------------------------------------------------------------------------
@@ -592,25 +592,31 @@ class TaxonomyIdTree:
         return str(self)
 
 def entries(
-    taxonomy: Union[io.TextIOBase, Iterable[TaxonomyEntry], str, Path]
+    taxonomy: Union[io.TextIOBase, Iterable[TaxonomyEntry], str, Path],
+    has_header: bool = False
 ) -> Iterable[TaxonomyEntry]:
     """
     Create an Iterable over a taxonomy file or iterable of taxonomy entries.
     """
     if isinstance(taxonomy, (str, Path)):
         with open_file(taxonomy, 'r') as buffer:
-            yield from read(buffer)
+            yield from read(buffer, has_header=has_header)
     elif isinstance(taxonomy, io.TextIOBase):
-        yield from read(taxonomy)
+        yield from read(taxonomy, has_header=has_header)
+    elif has_header:
+        yield from taxonomy[1:]
     else:
         yield from taxonomy
 
 
-def read(buffer: io.TextIOBase) -> Generator[TaxonomyEntry, None, None]:
+def read(buffer: io.TextIOBase, has_header: bool) -> Generator[TaxonomyEntry, None, None]:
     """
     Read taxonomies from a tab-separated file (TSV)
     """
-    for line in buffer:
+    iterator = iter(buffer)
+    if has_header:
+        next(iterator)
+    for line in iterator:
         identifier, taxonomy = line.rstrip().split('\t')
         yield TaxonomyEntry(identifier, taxonomy)
 
