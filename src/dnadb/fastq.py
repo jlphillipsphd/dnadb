@@ -7,6 +7,7 @@ from typing import Generator, Iterable, Tuple, Union
 
 from .db import DbFactory, DbWrapper
 from .dna import AbstractSequenceWrapper
+from .sample import ISample
 from .types import int_t
 from .utils import open_file
 
@@ -65,7 +66,7 @@ class FastqHeader:
             flowcell_id=left[2],
             lane=int(left[3]),
             tile=int(left[4]),
-            pos=tuple(map(int, left[5:])),
+            pos=(int(left[5]), int(left[6])),
             read_type=int(right[0]),
             is_filtered=right[1] == 'Y',
             control_number=int(right[2]),
@@ -156,7 +157,7 @@ class FastqDbFactory(DbFactory):
         super().before_close()
 
 
-class FastqDb(DbWrapper):
+class FastqDb(ISample[FastqEntry], DbWrapper):
     def __init__(self, fastq_db_path: Union[str, Path]):
         super().__init__(fastq_db_path)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
@@ -165,9 +166,9 @@ class FastqDb(DbWrapper):
         return self.length
 
     def __contains__(self, sequence_index: int_t) -> bool:
-        return str(sequence_index) in self.db
+        return sequence_index < self.length
 
-    def __iter__(self):
+    def __iter__(self) -> Generator[FastqEntry, None, None]:
         for i in range(len(self)):
             yield self[i]
 

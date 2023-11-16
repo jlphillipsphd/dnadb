@@ -1,6 +1,7 @@
 from lmdbm import Lmdb
 from pathlib import Path
 from typing import TypeVar, Union
+import uuid
 
 from .types import int_t
 
@@ -18,6 +19,8 @@ class DbFactory:
         self.buffer: dict[Union[str, bytes], bytes] = {}
         self.chunk_size = chunk_size
         self.is_closed = False
+        self.uuid = uuid.uuid4()
+        self.write("uuid", self.uuid.bytes)
 
     def flush(self):
         self.db.update(self.buffer)
@@ -43,9 +46,9 @@ class DbFactory:
     def close(self):
         if self.is_closed:
             return
+        self.is_closed = True
         self.before_close()
         self.db.close()
-        self.is_closed = True
 
     def __enter__(self):
         return self
@@ -58,26 +61,34 @@ class DbFactory:
 
 
 class DbWrapper:
-    __slots__ = ("__path", "__db", "__is_closed")
+    __slots__ = ("_path", "_db", "_is_closed", "_uuid")
 
     def __init__(self, path: Union[str, Path]):
-        self.__path = Path(path).absolute()
-        self.__db = Lmdb.open(str(path), lock=False)
-        self.__is_closed = False
+        self._path = Path(path).absolute()
+        self._db = Lmdb.open(str(path), lock=False)
+        self._is_closed = False
+        try:
+            self._uuid = uuid.UUID(bytes=self.db["uuid"])
+        except KeyError:
+            raise Exception(f"Database at {self.path} does not have a UUID.")
 
     def close(self):
-        if self.__is_closed:
+        if self._is_closed:
             return
-        self.__is_closed = True
-        return self.__db.close()
+        self._is_closed = True
+        return self._db.close()
 
     @property
     def db(self) -> Lmdb:
-        return self.__db
+        return self._db
 
     @property
     def path(self) -> Path:
-        return self.__path
+        return self._path
+
+    @property
+    def uuid(self) -> uuid.UUID:
+        return self._uuid
 
     def __enter__(self):
         return self

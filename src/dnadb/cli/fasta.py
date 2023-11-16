@@ -10,6 +10,11 @@ def define_arguments(parser: argparse.ArgumentParser):
         "import",
         help="Convert a FASTA file to a FASTA DB.")
     import_args.add_argument(
+        "--min-length",
+        type=int,
+        default=0,
+        help="The minimum length of a sequence to import.")
+    import_args.add_argument(
         "input_path",
         type=Path,
         help="The FASTA file to convert.")
@@ -62,8 +67,16 @@ def command_import(config: argparse.Namespace):
     output_path = config.output_path
     if output_path is None:
         output_path = config.input_path.with_suffix(".fasta.db")
+    num_skipped = 0
+    num_processed = 0
     with fasta.FastaDbFactory(output_path) as factory:
-        factory.write_entries(tqdm(fasta.entries(config.input_path)))
+        for entry in tqdm(fasta.entries(config.input_path)):
+            if len(entry.sequence) < config.min_length:
+                num_skipped += 1
+                continue
+            factory.write_entry(entry)
+            num_processed += 1
+    print(f"Done. Imported {num_processed:,} sequences. Skipped {num_skipped:,} sequences.")
 
 
 def command_export(config: argparse.Namespace):
@@ -78,8 +91,11 @@ def command_export(config: argparse.Namespace):
 
 def command_info(config: argparse.Namespace):
     from dnadb import fasta
+    uuid = None
     if config.input_path.suffix == ".db":
-        entries = iter(fasta.FastaDb(config.input_path))
+        fasta_db = fasta.FastaDb(config.input_path)
+        uuid = fasta_db.uuid
+        entries = iter(fasta_db)
     else:
         entries = fasta.entries(config.input_path)
     min_length = float("inf")
@@ -91,6 +107,8 @@ def command_info(config: argparse.Namespace):
         min_length = min(min_length, length)
         max_length = max(max_length, length)
     print(f"Info for: {config.input_path}")
+    if uuid is not None:
+        print(f"               UUID: {uuid}")
     print(f"             Length: {count:,}")
     print(f"  Shortest Sequence: {min_length:,}")
     print(f"   Longest Sequence: {max_length:,}")

@@ -1,15 +1,18 @@
-from dataclasses import dataclass, replace
+import bisect
+from dataclasses import dataclass, field, replace
+import enum
+from functools import singledispatchmethod
 import io
-from itertools import chain
 import json
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
 import re
-from typing import Dict, Generator, Iterable, List, Literal, Optional, overload, Tuple, Union
+from tqdm import tqdm
+from typing import Dict, Generator, Iterable, Iterator, List, Literal, Optional, overload, Tuple, TypeVar, Union
 
 from .db import DbFactory, DbWrapper
-from .types import int_t
+from .fasta import FastaDb, FastaEntry
 from .utils import open_file, sort_dict
 
 RANKS = ("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
@@ -21,7 +24,7 @@ def is_taxonomy(taxonomy: str) -> bool:
     """
     Check if a string is a valid taxonomy label.
     """
-    return bool(re.match(r"^\w__[^;]+(;\s*\w__[^;]+)*$", taxonomy))
+    return bool(re.match(r"^\w__[^;]+(;\s*\w__[^;]*)*;?$", taxonomy))
 
 
 def split_taxonomy(taxonomy: str, keep_empty: bool = False) -> Tuple[str, ...]:
@@ -41,567 +44,489 @@ def join_taxonomy(taxonomy: Union[Tuple[str, ...], List[str]], depth: Optional[i
     taxonomy = tuple(taxonomy) + ("",)*(depth - len(taxonomy))
     return "; ".join([f"{RANK_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
 
-# Taxonomy TSV Utilities ---------------------------------------------------------------------------
 
-@dataclass(frozen=True, order=True)
-class TaxonomyEntry:
-    __slots__ = ("identifier", "label")
-    identifier: str
+@overload
+def taxonomy_parent(taxonomy: str) -> str: ...
+@overload
+def taxonomy_parent(taxonomy: Tuple[str, ...]) -> Tuple[str, ...]: ...
+def taxonomy_parent(taxonomy: Union[str, Tuple[str, ...]]) -> Union[str, Tuple[str, ...]]:
+    """
+    Get the parent taxonomy of a taxonomy label
+    """
+    if isinstance(taxonomy, str):
+        taxons = split_taxonomy(taxonomy, keep_empty=True)
+    else:
+        taxons = taxonomy
+    # find the last non-empty taxon
+    for i in range(len(taxons) - 1, -1, -1):
+        if len(taxons[i]) > 0:
+            taxons = taxons[:i] + ("",)*(len(taxons) - i)
+            break
+    if isinstance(taxonomy, str):
+        return join_taxonomy(taxons)
+    return taxons
+
+# Taxonomy DB --------------------------------------------------------------------------------------
+
+class ITaxonomyEntry:
+    sequence_id: str
     label: str
 
-    @classmethod
-    def deserialize(cls, entry: bytes) -> "TaxonomyEntry":
-        return cls.from_str(entry.decode())
+@dataclass(frozen=True, order=True)
+class TaxonomyEntry(ITaxonomyEntry):
+    sequence_id: str
+    label: str
+
+    @property
+    def taxons(self):
+        return split_taxonomy(self.label, keep_empty=True)
+
+    @property
+    def depth(self):
+        return len(self.taxons)
+
+    def trim(self, depth: int):
+        return replace(self, label=join_taxonomy(self.taxons, depth=depth))
+
+    def __len__(self) -> int:
+        return len(self.label)
+
+    def __str__(self) -> str:
+        return "\t".join([self.sequence_id, self.label])
+
+
+TaxonomyDict = Dict[str, "TaxonomyDict"]
+class TaxonomyTreeFactory:
+    def __init__(self, depth: int = 7):
+        self.depth = depth
+        self._tree: TaxonomyDict = {}
+
+    def add_taxons(self, taxons: Tuple[str, ...]):
+        taxons = (taxons + ('',)*(self.depth - len(taxons)))[:self.depth]
+        tree = self._tree
+        for taxon in taxons:
+            if taxon not in tree:
+                tree[taxon] = {}
+            tree = tree[taxon]
+
+    def add_label(self, label: str):
+        self.add_taxons(split_taxonomy(label, keep_empty=True))
+
+    def add_entry(self, entry: TaxonomyEntry):
+        self.add_label(entry.label)
+
+    def add_entries(self, entries: Iterable[TaxonomyEntry]):
+        for entry in entries:
+            self.add_entry(entry)
+
+    def _sort_tree_dict(self, tree: TaxonomyDict):
+        sort_dict(tree)
+        for value in tree.values():
+            self._sort_tree_dict(value)
+
+    def build(self) -> "TaxonomyTree":
+        self._sort_tree_dict(self._tree)
+        return TaxonomyTree(self.depth, self._tree)
+
+
+class TaxonomyTree:
+
+    @dataclass(frozen=True)
+    class Taxon:
+        label: str = field(compare=False, hash=False)
+        rank: int = field(compare=True, hash=False)
+        taxon_id: int = field(compare=True)
+        taxonomy_id: int = field(compare=False, hash=False)
+        parent: "TaxonomyTree.Taxon" = field(compare=False, hash=False)
+        children: Dict[int, "TaxonomyTree.Taxon"] = field(default_factory=dict, compare=False, hash=False)
+        child_ids: Dict[str, int] = field(default_factory=dict, compare=False, hash=False)
+
+        def __init__(self, label: str, taxon_id: int = -1, taxonomy_id: int = -1, parent: Optional["TaxonomyTree.Taxon"] = None):
+            object.__setattr__(self, "label", label)
+            object.__setattr__(self, "rank", parent.rank+1 if parent is not None else -1)
+            object.__setattr__(self, "taxon_id", taxon_id)
+            object.__setattr__(self, "taxonomy_id", taxonomy_id)
+            object.__setattr__(self, "parent", parent) # None is allowed
+            object.__setattr__(self, "children", {})
+            object.__setattr__(self, "child_ids", {})
+            if self.parent is not None:
+                self.parent.children[taxon_id] = self
+                self.parent.child_ids[label] = self.taxon_id
+
+        def add_child(self, label: str, taxon_id: int, taxonomy_id: int) -> "TaxonomyTree.Taxon":
+            assert label not in self.child_ids, f"Taxon {label} already exists"
+            self.children[taxon_id] = TaxonomyTree.Taxon(label, taxon_id, taxonomy_id, self)
+            self.child_ids[label] = taxon_id
+            return self.children[taxon_id]
+
+        @property
+        def taxonomy_label(self) -> str:
+            return join_taxonomy(self.taxons)
+
+        @property
+        def taxons(self) -> Tuple[str, ...]:
+            head = self
+            taxons: Tuple[str, ...] = ()
+            while head.rank != -1:
+                taxons = (head.label,) + taxons
+                head = head.parent
+            return taxons
+
+        @property
+        def taxon_ids(self) -> Tuple[int, ...]:
+            head = self
+            taxon_ids: Tuple[int, ...] = ()
+            while head.rank != -1:
+                taxon_ids = (head.taxon_id,) + taxon_ids
+                head = head.parent
+            return taxon_ids
+
+        def __contains__(self, label_or_taxon_id: Union[str, int]) -> bool:
+            if isinstance(label_or_taxon_id, str):
+                return label_or_taxon_id in self.child_ids
+            return label_or_taxon_id in self.children
+
+        def __getitem__(self, label_or_taxon_id: Union[str, int]) -> "TaxonomyTree.Taxon":
+            if isinstance(label_or_taxon_id, str):
+                label_or_taxon_id = self.child_ids[label_or_taxon_id]
+            return self.children[label_or_taxon_id]
+
+        def __iter__(self) -> Iterator["TaxonomyTree.Taxon"]:
+            return iter(self.children.values())
+
+        def __len__(self) -> int:
+            return len(self.children)
+
+        def __repr__(self) -> str:
+            params = [
+                "label=" + repr(self.label),
+            ]
+            if self.rank != -1:
+                params += [
+                    "taxon_id=" + repr(self.taxon_id),
+                    "taxonomy_id=" + repr(self.taxonomy_id),
+                    "taxonomy_label=" + repr(self.taxonomy_label),
+                ]
+            return f"Taxon({', '.join(params)})"
 
     @classmethod
-    def from_str(cls, entry: str) -> "TaxonomyEntry":
-        """
-        Create a taxonomy entry from a string
-        """
-        identifier, taxonomy = entry.rstrip().split('\t')
-        return cls(identifier, taxonomy)
+    def deserialize(cls, taxonomy_tree_bytes: bytes) -> "TaxonomyTree":
+        return cls(**json.loads(taxonomy_tree_bytes))
 
-    def taxons(self) -> Tuple[str, ...]:
-        return split_taxonomy(self.label)
+    def __init__(self, depth: int, tree: TaxonomyDict):
+        self.depth = depth
+        self.id_to_taxon_map, self.taxon_to_id_map = self._build_taxon_id_maps(tree)
+        self.tree, self.taxonomy_id_map = self._build_tree_and_taxonomy_map(tree)
+
+    def _build_taxon_id_maps(
+        self,
+        tree: TaxonomyDict
+    ) -> Tuple[Tuple[List[str], ...], Tuple[Dict[str, int], ...]]:
+        taxon_id_to_taxon_map: Tuple[List[str], ...] = tuple([] for _ in range(self.depth))
+        stack: List[Tuple[int, TaxonomyDict]] = [(0, tree)]
+        while len(stack) > 0:
+            rank, tree = stack.pop()
+            for taxon in tree:
+                index = bisect.bisect_left(taxon_id_to_taxon_map[rank], taxon)
+                if index >= len(taxon_id_to_taxon_map[rank]) or taxon_id_to_taxon_map[rank][index] != taxon:
+                    taxon_id_to_taxon_map[rank].insert(index, taxon)
+                if len(tree[taxon]) > 0:
+                    stack.append((rank + 1, tree[taxon]))
+        taxon_to_taxon_id_map = tuple({t: i for i, t in enumerate(g)} for g in taxon_id_to_taxon_map)
+        return taxon_id_to_taxon_map, taxon_to_taxon_id_map
+
+    def _build_tree_and_taxonomy_map(self, tree: TaxonomyDict) -> Tuple[Taxon, Tuple[List[Taxon], ...]]:
+        taxonomy_id_to_taxon_map = tuple([] for _ in range(self.depth))
+        root = TaxonomyTree.Taxon("Root")
+        stack: List[Tuple[TaxonomyTree.Taxon, TaxonomyDict]] = [(root, tree)]
+        while len(stack) > 0:
+            parent, head = stack.pop()
+            for label in head:
+                taxon_id = self.taxon_to_id_map[parent.rank + 1][label]
+                taxonomy_id = len(taxonomy_id_to_taxon_map[parent.rank+1])
+                taxon = parent.add_child(label, taxon_id, taxonomy_id)
+                taxonomy_id_to_taxon_map[parent.rank+1].append(taxon)
+                assert taxonomy_id_to_taxon_map[parent.rank+1][taxonomy_id] == taxon
+                if len(head[taxon.label]) > 0:
+                    stack.append((taxon, head[taxon.label]))
+        return root, taxonomy_id_to_taxon_map
+
+    def reduce_entry(self, label: TaxonomyEntry) -> TaxonomyEntry:
+        return replace(label, label=self.reduce_label(label.label))
+
+    def reduce_label(self, label: str) -> str:
+        return join_taxonomy(self.reduce_taxons(split_taxonomy(label, keep_empty=True)))
+
+    def reduce_taxons(self, taxons: Tuple[str, ...], pad: bool = True) -> Tuple[str, ...]:
+        count = 0
+        head = self.tree
+        for taxon in taxons:
+            if taxon not in head.child_ids:
+                break
+            count += 1
+            head = head[taxon]
+        if pad:
+            return taxons[:count] + ("",)*(len(taxons) - count)
+        return taxons[:count]
+
+    def has_taxonomy(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> bool:
+        if isinstance(taxonomy, int):
+            return taxonomy < len(self.taxonomy_id_map[self.depth - 1])
+        if isinstance(taxonomy, TaxonomyEntry):
+            taxonomy = taxonomy.label
+        if isinstance(taxonomy, str):
+            taxonomy = split_taxonomy(taxonomy, keep_empty=True)
+        head = self.tree
+        try:
+            for taxon in taxonomy:
+                head = head[taxon]
+            if head.rank == -1 > 0:
+                raise KeyError()
+        except KeyError:
+            return False
+        return True
+
+    def taxonomy(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> "TaxonomyTree.Taxon":
+        if isinstance(taxonomy, int):
+            return self.taxonomy_id_map[self.depth - 1][taxonomy]
+        if isinstance(taxonomy, TaxonomyEntry):
+            taxonomy = taxonomy.label
+        if isinstance(taxonomy, str):
+            taxonomy = split_taxonomy(taxonomy, keep_empty=True)
+        head = self.tree
+        try:
+            for taxon in taxonomy:
+                head = head[taxon]
+            if head.rank == -1 > 0:
+                raise KeyError()
+        except KeyError:
+            raise KeyError(f"Taxonomy {taxonomy} not found")
+        return head
 
     def serialize(self) -> bytes:
-        return str(self).encode()
+        tree: TaxonomyDict = {}
+        stack: List[Tuple[TaxonomyTree.Taxon, TaxonomyDict]] = [(self.tree, tree)]
+        while len(stack) > 0:
+            head, tree_head = stack.pop()
+            for child in head:
+                tree_head[child.label] = {}
+                stack.append((child, tree_head[child.label]))
+        return json.dumps(dict(depth=self.depth, tree=tree)).encode()
 
-    def __str__(self):
-        return f"{self.identifier}\t{self.label}"
+    def __contains__(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> bool:
+        return self.has_taxonomy(taxonomy)
+
+    def __getitem__(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> "TaxonomyTree.Taxon":
+        return self.taxonomy(taxonomy)
+
+    def __iter__(self) -> Iterator["TaxonomyTree.Taxon"]:
+        return iter(self.taxonomy_id_map[self.depth - 1])
+
+
+@dataclass(frozen=True)
+class TaxonomyDbEntry(ITaxonomyEntry):
+    db: "TaxonomyDb"
+    sequence_index: int
+    label_id: int
+
+    @property
+    def fasta_entry(self) -> FastaEntry:
+        assert self.db.fasta_db is not None, "FASTA DB is not available."
+        return self.db.fasta_db[self.sequence_index]
+
+    @property
+    def label(self):
+        return self.taxonomy.taxonomy_label
+
+    @property
+    def sequence_id(self) -> str:
+        return self.db.sequence_index_to_id(self.sequence_index)
+
+    @property
+    def taxonomy(self) -> "TaxonomyTree.Taxon":
+        return self.db.tree.taxonomy_id_map[-1][self.label_id]
 
 
 class TaxonomyDbFactory(DbFactory):
-    """
-    A factory for creating LMDB-backed databases of taxonomy entries.
+    def __init__(self, path: Union[str, Path], fasta_db: FastaDb, depth: int = 7):
+        super().__init__(path)
+        self.depth = depth
+        self.fasta_db = fasta_db
+        self.sequences: Dict[str, List[int]] = {}
+        self.num_sequences = 0
 
-    [index to label]
-    0 -> k__bacteria;...
-    1 -> ...
-    ...
-
-    [label to index]
-    k__bacteria;... -> 0
-    ... -> 1
-    ...
-
-    [label counts]
-    0_count -> 2
-    1 -> 1
-    ...
-
-    [label index to fasta id]
-    0_0 -> abc
-    0_1 -> def
-    1_0 -> efg
-    ...
-
-    [fasta_id to label index]
-    abc -> 0
-    def -> 0
-    efg -> 1
-    ...
-    """
-    __slots__ = ("num_entries",)
-
-    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
-        super().__init__(path, chunk_size)
-        self.num_entries = np.int32(0)
+    def write_sequence(self, sequence_id: str, label: str):
+        sequence_index = self.fasta_db.sequence_id_to_index(sequence_id)
+        if label not in self.sequences:
+            self.sequences[label] = []
+        bisect.insort(self.sequences[label], sequence_index)
+        self.num_sequences += 1
 
     def write_entry(self, entry: TaxonomyEntry):
-        """
-        Create a new taxonomy LMDB database from taxonomy entries.
-        """
-        if not self.contains(entry.label):
-            # index -> label, label -> index
-            self.write(str(self.num_entries), entry.label.encode())
-            self.write(entry.label, self.num_entries.tobytes())
-            self.write(f"count_{self.num_entries}", np.int32(0).tobytes())
-            self.num_entries += 1
-        index: np.int32 = np.frombuffer(self.read(entry.label), dtype=np.int32, count=1)[0]
-        count: np.int32 = np.frombuffer(self.read(f"count_{index}"), dtype=np.int32, count=1)[0]
-        self.write(f"{index}_{count}", entry.identifier.encode())
-        self.write(f">{entry.identifier}", index.tobytes())
-        self.write(f"count_{index}", (count + 1).tobytes())
+        self.write_sequence(entry.sequence_id, entry.label)
 
     def write_entries(self, entries: Iterable[TaxonomyEntry]):
         for entry in entries:
             self.write_entry(entry)
 
     def before_close(self):
-        self.write("length", self.num_entries.tobytes())
-        super().before_close()
+        tree = TaxonomyTreeFactory(self.depth)
+        for label in self.sequences:
+            tree.add_label(label)
+        tree = tree.build()
+        self.write("fasta_uuid", self.fasta_db.uuid.bytes)
+        self.write("tree", tree.serialize())
+        self.write("num_sequences", np.int32(self.num_sequences).tobytes())
+        self.write("num_labels", np.int32(len(self.sequences)).tobytes())
+        for label, sequence_indices in tqdm(self.sequences.items(), desc="Writing labels disk..."):
+            taxonomy_id = tree.taxonomy(label).taxonomy_id
+            self.write(f"sequences_{taxonomy_id}", np.array(sequence_indices, dtype=np.int32).tobytes())
+            for sequence_index in sequence_indices:
+                sequence_id = self.fasta_db.index_to_sequence_id(sequence_index)
+                self.write(str(sequence_index), np.int32(taxonomy_id).tobytes())
+                self.write(f"sequence_index_{sequence_index}", sequence_id.encode())
+                self.write(f"sequence_{sequence_id}", np.int32(sequence_index).tobytes())
+        return super().before_close()
 
 
 class TaxonomyDb(DbWrapper):
-    __slots__ = ("length",)
 
-    def __init__(self, taxonomy_db_path: Union[str, Path]):
-        super().__init__(taxonomy_db_path)
-        self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+    # sequence_index -> label_id
+    # sequence_index_x -> sequence_id
+    # sequence_x -> sequence_index
 
-    def contains_fasta_id(self, fasta_identifier: str) -> bool:
-        """
-        Check if a FASTA identifier exists in the database.
-        """
-        return f">{fasta_identifier}" in self.db
+    class InMemory(enum.Flag):
+        Nothing = 0
+        SequencesWithTaxonomy = enum.auto()
+        SequenceLabels = enum.auto()
+        SequenceIdMaps = enum.auto()
+        All = SequencesWithTaxonomy | SequenceLabels | SequenceIdMaps
 
-    def contains_label(self, label: str) -> bool:
-        """
-        Check if a taxonomy label exists in the database.
-        """
-        return label in self.db
+    _sequences_with_label: Dict[int, npt.NDArray[np.int32]]|None = None # label_id -> sequence_indices
+    _sequence_labels: Dict[int, int]|None = None                        # sequence_index -> label_id
+    _sequence_id_to_index: Dict[str, int]|None = None                   # sequence_id -> sequence_index
+    _sequence_index_to_id: Dict[int, str]|None = None                   # sequence_index -> sequence_id
 
-    def count(self, label_index: int_t) -> int:
-        """
-        Get the number of sequences with a given label index.
-        """
-        return int(np.frombuffer(self.db[f"count_{label_index}"], dtype=np.int32, count=1)[0])
+    def __init__(
+        self,
+        path: Union[str, Path],
+        fasta_db: Optional[FastaDb] = None,
+        in_memory: InMemory = InMemory.Nothing
+    ):
+        super().__init__(path)
+        self.fasta_db = fasta_db
+        if self.fasta_db is not None:
+            assert self.fasta_db.uuid.bytes == self.db["fasta_uuid"], "FASTA DB UUID does not match"
+        self.tree = TaxonomyTree.deserialize(self.db["tree"])
+        self.num_sequences = np.frombuffer(self.db["num_sequences"], dtype=np.int32)[0]
+        self.num_labels = np.frombuffer(self.db["num_labels"], dtype=np.int32)[0]
 
-    def counts(self) -> Generator[int, None, None]:
-        """
-        Get the number of sequences for each label index.
-        """
-        for i in range(self.length):
-            yield self.count(i)
+        if TaxonomyDb.InMemory.SequencesWithTaxonomy in in_memory:
+            self._sequences_with_label = {}
+            for i in range(self.num_labels):
+                self._sequences_with_label[i] = np.frombuffer(self.db[f"sequences_{i}"], dtype=np.int32)
 
-    def fasta_id_with_label(self, label_index: int_t, fasta_index: int_t) -> str:
-        """
-        Get the FASTA identifier for a given label and index.
-        """
-        return self.db[f"{label_index}_{fasta_index}"].decode()
+        if TaxonomyDb.InMemory.SequenceLabels in in_memory:
+            self._sequence_labels = {}
+            for i in range(self.num_sequences):
+                self._sequence_labels[i] = np.frombuffer(self.db[str(i)], dtype=np.int32)[0]
 
-    def fasta_ids_with_label(self, label_index: int_t) -> Generator[str, None, None]:
-        """
-        Get the FASTA identifiers for a given label.
-        """
-        for i in range(self.count(label_index)):
-            yield self.fasta_id_with_label(label_index, i)
+        if TaxonomyDb.InMemory.SequenceIdMaps in in_memory:
+            self._sequence_id_to_index = {}
+            self._sequence_index_to_id = {}
+            for i in range(self.num_sequences):
+                sequence_id = self.db[f"sequence_index_{i}"].decode()
+                self._sequence_id_to_index[sequence_id] = i
+                self._sequence_index_to_id[i] = sequence_id
 
-    def fasta_id_to_index(self, fasta_identifier: str) -> int:
-        """
-        Get the taxonomy index for a given FASTA identifier.
-        """
-        return int(np.frombuffer(self.db[f">{fasta_identifier}"], dtype=np.int32, count=1)[0])
+    def count(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> int:
+        return sum(1 for _ in self.sequences_with_taxonomy(taxonomy))
 
-    def fasta_id_to_label(self, fasta_identifier: str) -> str:
-        """
-        Get the taxonomy label for a given FASTA identifier.
-        """
-        return self.label(self.fasta_id_to_index(fasta_identifier))
+    def has_taxonomy(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> bool:
+        return self.tree.has_taxonomy(taxonomy)
 
-    def label(self, label_index: int_t) -> str:
-        """
-        Get the taxonomy label for a given index.
-        """
-        return self.db[str(label_index)].decode()
+    def labels(self, depth: int = -1) -> Iterator[TaxonomyTree.Taxon]:
+        return iter(self.tree.taxonomy_id_map[depth])
 
-    def labels(self) -> Generator[str, None, None]:
-        """
-        Get the taxonomy labels.
-        """
-        for i in range(self.length):
-            yield self.label(i)
+    def sequence_index_to_id(self, sequence_index: int) -> str:
+        if self._sequence_index_to_id is not None:
+            return self._sequence_index_to_id[sequence_index]
+        return self.db[f"sequence_index_{sequence_index}"].decode()
 
-    def label_to_index(self, label: str) -> np.int32:
-        """
-        Get the taxonomy index for a given label.
-        """
-        return np.frombuffer(self.db[label], dtype=np.int32, count=1)[0]
+    def sequence_id_to_index(self, sequence_id: str) -> int:
+        if self._sequence_id_to_index is not None:
+            return self._sequence_id_to_index[sequence_id]
+        return np.frombuffer(self.db[f"sequence_{sequence_id}"], dtype=np.int32)[0]
 
-    def __len__(self):
-        return self.length
+    @singledispatchmethod
+    def __contains__(self, sequence_index: int):
+        return sequence_index < self.num_sequences
 
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self.db[str(i)].decode()
+    @__contains__.register
+    def _(self, sequence_id: str):
+        if self._sequence_id_to_index is not None:
+            return sequence_id in self._sequence_id_to_index
+        return f"sequence_{sequence_id}" in self.db
 
-# Taxonomy ID Map ----------------------------------------------------------------------------------
+    @singledispatchmethod
+    def sequences_with_taxonomy(self, taxonomy_id: int) -> Generator[TaxonomyDbEntry, None, None]:
+        if self._sequences_with_label is not None:
+            sequence_indices = self._sequences_with_label[taxonomy_id]
+        else:
+            sequence_indices = np.frombuffer(self.db[f"sequences_{taxonomy_id}"], dtype=np.int32)
+        for i in sequence_indices:
+            yield TaxonomyDbEntry(self, i, taxonomy_id)
 
-class TaxonomyIdMap:
-    """
-    A bidirectional map between taxonomy labels and integer IDs.
-    """
-    @classmethod
-    def deserialize(cls, id_map_json_bytes: Union[str, bytes, bytearray]) -> "TaxonomyIdMap":
-        """
-        Deserialize a taxonomy ID map from a bytes object.
-        """
-        id_map = json.loads(id_map_json_bytes)
-        return cls(id_map)
+    @sequences_with_taxonomy.register
+    def _(self, taxonomy: TaxonomyTree.Taxon) -> Generator[TaxonomyDbEntry, None, None]:
+        return self.sequences_with_taxonomy(taxonomy.taxonomy_id)
 
-    @classmethod
-    def from_db(cls, db: Union[TaxonomyDb, Iterable[TaxonomyDb]]) -> "TaxonomyIdMap":
-        """
-        Create a taxonomy ID map from the given taxonomy database(s).
-        """
-        if isinstance(db, TaxonomyDb):
-            db = [db]
-        return cls(chain(*(d.labels() for d in db)))
+    @sequences_with_taxonomy.register
+    def _(self, taxonomy_label: str) -> Generator[TaxonomyDbEntry, None, None]:
+        return self.sequences_with_taxonomy(self.tree.taxonomy(taxonomy_label))
 
-    def __init__(self, taxonomy_labels: Optional[Iterable[str]] = None):
-        self.id_to_label_map: List[str] = []
-        self.label_to_id_map: Dict[str, int] = {}
-        if taxonomy_labels:
-            return self.add_taxonomies(taxonomy_labels)
+    @singledispatchmethod
+    def __getitem__(self, sequence_index: int) -> TaxonomyDbEntry:
+        if self._sequence_labels is not None:
+            taxonomy_id = self._sequence_labels[sequence_index]
+        else:
+            taxonomy_id = np.frombuffer(self.db[f"{sequence_index}"], dtype=np.int32)[0]
+        return TaxonomyDbEntry(self, sequence_index, taxonomy_id)
 
-    def add_taxonomy(self, taxonomy_label: str):
-        """
-        Add a taxonomy label to the ID map.
-        """
-        if taxonomy_label in self.label_to_id_map:
-            return
-        self.label_to_id_map[taxonomy_label] = len(self.label_to_id_map)
-        self.id_to_label_map.append(taxonomy_label)
-
-    def add_taxonomies(self, taxonomy_labels: Iterable[str]):
-        """
-        Add a set of taxonomy labels
-        """
-        for label in taxonomy_labels:
-            self.add_taxonomy(label)
-
-    def labels(self) -> Generator[str, None, None]:
-        """
-        Get the taxonomy labels.
-        """
-        yield from self.label_to_id_map
-
-    def has_label(self, label: str) -> bool:
-        """
-        Check if the ID map has a given taxonomy label.
-        """
-        return label in self.label_to_id_map
-
-    def id_to_label(self, label_id: int) -> str:
-        """
-        Get the taxonomy label for a given label ID.
-        """
-        return self.id_to_label_map[label_id]
-
-    def label_to_id(self, label: str) -> int:
-        """
-        Get the taxonomy label ID for a given label.
-        """
-        return self.label_to_id_map[label]
-
-    def __eq__(self, other: "TaxonomyIdMap"):
-        """
-        Check if two taxonomy ID maps are equal.
-        """
-        return self.id_to_label_map == other.id_to_label_map
-
-    @overload
-    def __getitem__(self, key: str) -> int:
-        ...
-
-    @overload
-    def __getitem__(self, key: int) -> str:
-        ...
-
-    def __getitem__(self, key: Union[str, int]) -> Union[str, int]:
-        if isinstance(key, str):
-            return self.label_to_id(key)
-        return self.id_to_label(key)
-
-    def __iter__(self) -> Iterable[str]:
-        return iter(self.label_to_id_map)
+    @__getitem__.register
+    def _(self, sequence_id: str) -> TaxonomyDbEntry:
+        return self[self.sequence_id_to_index(sequence_id)]
 
     def __len__(self) -> int:
-        return len(self.id_to_label_map)
+        return self.num_sequences
 
-    def serialize(self) -> bytes:
-        return json.dumps(self.id_to_label_map).encode()
+    def __iter__(self) -> Iterator[TaxonomyDbEntry]:
+        for i in range(self.num_sequences):
+            yield self[i]
 
-    def display(self, max: Optional[int] = None):
-        print(str(self))
-        if len(self) == 0:
-            print("  Empty")
-            return
-        n = len(self) if max is None else min(len(self), max)
-        spacing = int(np.log10(n)) + 1
-        for i, label in enumerate(self.id_to_label_map[:n]):
-            print(f"  {i:>{spacing}}: {label}")
-
-    def __str__(self) -> str:
-        return f"TaxonomyIdMap({len(self)})"
-
-    def __repr__(self) -> str:
-        return str(self)
-
-# Taxonomy Hierarchy -------------------------------------------------------------------------------
-
-class TaxonomyIdTree:
-    @classmethod
-    def deserialize(cls, taxonomy_id_tree_bytes: Union[str, bytes]):
-        deserialized = json.loads(taxonomy_id_tree_bytes)
-        tree = cls(deserialized["depth"], deserialized["pad"])
-        tree.tree = deserialized["tree"]
-        return tree
-
-    @classmethod
-    def from_db(cls, db: TaxonomyDb, depth: int = 7) -> "TaxonomyIdTree":
-        """
-        Create a taxonomy hierarchy from a taxonomy database.
-        """
-        tree = cls(depth)
-        tree.add_labels(db)
-        return tree
-
-    def __init__(self, depth: int = 7, pad: bool = True):
-        self.depth = depth
-        self.pad = pad
-        self.tree = {}
-        self._id_to_taxons_map: Union[Tuple[List[Tuple[str, ...]], ...], None]
-        self._taxons_to_id_map: Union[Dict[Tuple[str, ...], int], None]
-        self._mark_dirty()
-
-    def add_taxons(self, taxons: Tuple[str, ...]):
-        """
-        Add a taxon hierarchy to the tree.
-        """
-        self._mark_dirty()
-        head = self.tree
-        if len(taxons) < self.depth and self.pad:
-            taxons += ('',)*(self.depth - len(taxons))
-        for taxon in taxons[:self.depth]:
-            if not self.pad and taxon == "":
-                break
-            if taxon not in head:
-                head[taxon] = {}
-            head = head[taxon]
-
-    def add_label(self, label: str):
-        """
-        Add a taxonomy label to the tree.
-        """
-        self.add_taxons(split_taxonomy(label, keep_empty=self.pad))
-
-    def add_labels(self, labels: Iterable[str]):
-        """
-        Add a list of taxonomy labels to the tree.
-        """
-        for label in labels:
-            self.add_label(label)
-
-    def add_entry(self, entry: TaxonomyEntry):
-        """
-        Add a taxonomy entry to the tree.
-        """
-        self.add_label(entry.label)
-
-    def add_entries(self, entries: Iterable[TaxonomyEntry]):
-        """
-        Add taxonomy entries to the tree.
-        """
-        for entry in entries:
-            self.add_entry(entry)
-
-    def has_entry(self, entry: TaxonomyEntry) -> bool:
-        """
-        Check if the tree contains the given taxonomy entry.
-        """
-        return self.has_label(entry.label)
-
-    def has_label(self, label: str) -> bool:
-        """
-        Check if the tree contains the given taxonomy label.
-        """
-        return self.has_taxons(split_taxonomy(label, keep_empty=self.pad))
-
-    def has_taxons(self, taxons: Tuple[str, ...]) -> bool:
-        """
-        Check if the tree contains the given hierarchy of taxons.
-        """
-        return taxons in self.taxons_to_id_map
-
-    def id_to_label(self, depth: int, identifier: int) -> str:
-        """
-        Map an identifier to a taxonomy label.
-        """
-        return join_taxonomy(self.id_to_taxons(depth, identifier))
-
-    def id_to_taxons(self, depth: int, identifier: int) -> Tuple[str, ...]:
-        """
-        Map a taxon identifier to its taxon hierarchy tuple.
-        """
-        return self.id_to_taxons_map[depth][identifier]
-
-    def label_to_id(self, label: str) -> int:
-        """
-        Map the given taxonomy label to a hierarchy integer identifier.
-        """
-        return self.taxons_to_id(split_taxonomy(label, keep_empty=False))
-
-    def taxons_to_id(self, taxons: Tuple[str, ...]) -> int:
-        """
-        Map the given taxonomy hierarchy tuple to an integer identifier for the hierarchy.
-        """
-        return self.taxons_to_id_map[taxons]
-
-    def reduce_entry(self, entry: TaxonomyEntry) -> TaxonomyEntry:
-        """
-        Reduce the given taxonomy entry to a valid label in this tree.
-        """
-        return replace(entry, label=self.reduce_taxonomy(entry.label))
-
-    def reduce_label(self, label: str) -> str:
-        """
-        Reduce the given taxonomy label to a valid label in this tree.
-        """
-        taxons = split_taxonomy(label, keep_empty=self.pad)
-        return join_taxonomy(self.reduce_taxons(taxons), depth=len(taxons))
-
-    def reduce_taxons(self, taxons: Tuple[str, ...]) -> Tuple[str, ...]:
-        """
-        Reduce the given taxon hierarchy to a valid taxon hierarchy in this tree.
-        """
-        head = self.tree
-        result: Tuple[str, ...] = ()
-        for taxon in taxons:
-            if taxon not in head:
-                break
-            result += (taxon,)
-            head = head[taxon]
-        return result
-
-    def tokenize_label(self, taxonomy: str) -> npt.NDArray[np.int32]:
-        """
-        Tokenize the taxonomy label into a a tuple of taxon integer IDs
-
-        Args:
-            taxonomy (str): The taxonomy label to tokenize (e.g. "k__Bacteria; ...").
-
-        Returns:
-            np.ndarray[np.int32]: The tokenized taxonomy.
-        """
-        return self.tokenize_taxons(split_taxonomy(taxonomy, keep_empty=True)[:self.depth])
-
-    def tokenize_taxons(self, taxons: Tuple[str, ...]) -> npt.NDArray[np.int32]:
-        """
-        Tokenize the taxonomy tuple into a a tuple of taxon integer IDs
-
-        Args:
-            taxons (Tuple[str, ...]): The taxonomy tuple to tokenize.
-
-        Returns:
-            np.ndarray[np.int32]: The tokenized taxonomy.
-        """
-        result = np.empty(len(taxons), np.int32)
-        for i in range(len(taxons)):
-            result[i] = self.taxons_to_id_map[taxons[:i+1]]
-        return result
-
-    def detokenize_label(self, taxon_tokens: npt.NDArray[np.int32]) -> str:
-        """
-        Detokenize the taxonomy tokens into a taxonomy label.
-
-        Args:
-            taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
-
-        Returns:
-            str: The detokenized taxonomy label.
-        """
-        return join_taxonomy(self.detokenize_taxons(taxon_tokens), depth=self.depth)
-
-    def detokenize_taxons(self, taxon_tokens: npt.NDArray[np.int32]) -> Tuple[str, ...]:
-        """
-        Detokenize the taxonomy tokens into a taxonomy tuple.
-
-        Args:
-            taxon_tokens (npt.NDArray[np.int64]): The taxonomy tokens.
-
-        Returns:
-            Tuple[str, ...]: The detokenized taxonomy tuple.
-        """
-        i = len(taxon_tokens) - 1
-        return self.id_to_taxons_map[i][taxon_tokens[i]]
-
-    def _mark_dirty(self):
-        """
-        Require a rebuild ofthe identifier maps.
-        """
-        self._id_to_taxons_map = None
-        self._taxons_to_id_map = None
-
-    def update(self, other_taxonomy_id_tree: "TaxonomyIdTree"):
-        """
-        Merge another tree into this tree.
-        """
-        def merge(a, b, depth: int = 0):
-            if depth >= self.depth:
-                return
-            for taxon, children in b.items():
-                if taxon not in a:
-                    a[taxon] = {}
-                merge(a[taxon], children, depth+1)
-        merge(self.tree, other_taxonomy_id_tree.tree)
-
-    def build(self):
-        """
-        Build the identifier maps given the current tree state.
-        """
-        self._id_to_taxons_map = tuple([] for _ in range(self.depth))
-        self._taxons_to_id_map = {}
-        sort_dict(self.tree)
-        stack = [((), self.tree)]
-        while len(stack) > 0:
-            taxons, head = stack.pop()
-            depth = len(taxons)
-            s = []
-            for taxon, children in head.items():
-                next_taxons = taxons + (taxon,)
-                identifier = len(self._id_to_taxons_map[depth])
-                self._id_to_taxons_map[depth].append(next_taxons)
-                self._taxons_to_id_map[next_taxons] = identifier
-                sort_dict(children)
-                s.append((next_taxons, children))
-            stack += reversed(s)
-
-    def serialize(self) -> bytes:
-        """
-        Serialize the tree into bytes.
-        """
-        return bytes(json.dumps({
-            "depth": self.depth,
-            "pad": self.pad,
-            "tree": self.tree
-        }).encode())
-
-    def copy(self) -> "TaxonomyIdTree":
-        """
-        Create a copy of the tree.
-        """
-        return self.deserialize(self.serialize())
-
-    @property
-    def id_to_taxons_map(self) -> Tuple[List[Tuple[str, ...]], ...]:
-        if self._id_to_taxons_map is None:
-            self.build()
-        return self._id_to_taxons_map
-
-    @property
-    def taxons_to_id_map(self) -> Dict[Tuple[str, ...], int]:
-        if self._taxons_to_id_map is None:
-            self.build()
-        return self._taxons_to_id_map
-
-    def __eq__(self, other: "TaxonomyIdTree"):
-        return self.id_to_taxons_map == other.id_to_taxons_map
-
-    def __iter__(self) -> Iterable[str]:
-        return iter(self.id_to_taxons_map[-1])
-
-    def __str__(self):
-        return f"TaxonomyIdTree(depth={self.depth}, num_labels={len(self.id_to_taxons_map[-1])})"
-
-    def __repr__(self):
-        return str(self)
-
+T = TypeVar("T", bound=ITaxonomyEntry)
 def entries(
-    taxonomy: Union[io.TextIOBase, Iterable[TaxonomyEntry], str, Path],
+    taxonomy: Union[io.TextIOBase, Iterable[T], str, Path],
     header: bool|Literal["auto"] = "auto"
-) -> Iterable[TaxonomyEntry]:
+) -> Generator[TaxonomyEntry, None, None]:
     """
     Create an Iterable over a taxonomy file or iterable of taxonomy entries.
     """
@@ -610,31 +535,33 @@ def entries(
             yield from read(buffer, header=header)
     elif isinstance(taxonomy, io.TextIOBase):
         yield from read(taxonomy, header=header)
-    elif header:
-        yield from taxonomy[1:]
     else:
-        yield from taxonomy
+        yield from map(lambda entry: TaxonomyEntry(entry.sequence_id, entry.label), taxonomy)
 
 
-def read(buffer: io.TextIOBase, header: bool|Literal["auto"]) -> Generator[TaxonomyEntry, None, None]:
+def read(
+    buffer: io.TextIOBase,
+    header: bool|Literal["auto"] = "auto"
+) -> Generator[TaxonomyEntry, None, None]:
     """
     Read taxonomies from a tab-separated file (TSV)
     """
     iterator = iter(buffer)
     if header == "auto":
-        identifier, taxonomy = next(iterator).strip().split('\t')
+        sequence_id, taxonomy = next(iterator).strip().split('\t')
         if is_taxonomy(taxonomy):
-            yield TaxonomyEntry(identifier, taxonomy)
+            yield TaxonomyEntry(sequence_id, taxonomy)
     elif header:
         next(iterator)
     for line in iterator:
-        identifier, taxonomy = line.rstrip().split('\t')
-        yield TaxonomyEntry(identifier, taxonomy)
+        sequence_id, taxonomy = line.rstrip().split('\t')
+        yield TaxonomyEntry(sequence_id, taxonomy)
 
 
-def write(buffer: io.TextIOBase, entries: Iterable[TaxonomyEntry]):
+def write(buffer: io.TextIOBase, entries: Iterable[ITaxonomyEntry]):
     """
     Write taxonomy entries to a tab-separate file (TSV)
     """
     for entry in entries:
-        buffer.write(f"{entry.identifier}\t{entry.label}\n")
+        buffer.write(f"{entry.sequence_id}\t{entry.label}\n")
+

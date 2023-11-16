@@ -1,14 +1,15 @@
+import bisect
 from dataclasses import dataclass
 from functools import singledispatchmethod
 import io
 import numpy as np
+import numpy.typing as npt
 from pathlib import Path
-from typing import Generator, Iterable, Optional, Tuple, Union
+from typing import Callable, Generator, Iterable, Tuple, Union
 
 from .db import DbFactory, DbWrapper
 from .dna import AbstractSequenceWrapper
-from .taxonomy import TaxonomyEntry
-from .types import int_t
+from .sample import ISample
 from .utils import open_file
 
 @dataclass(frozen=True, order=True)
@@ -81,111 +82,221 @@ class FastaDbFactory(DbFactory):
         super().before_close()
 
 
-class FastaDb(DbWrapper):
+class FastaDb(ISample[FastaEntry], DbWrapper):
     """
     An LMDB-backed database of FASTA entries.
     """
-    def __init__(self, fasta_db_path: Union[str, Path]):
+    __slots__ = ("length", "contains_sequence_id", "sequence_id_to_index", "entry", "_id_map", "_sequences")
+
+    length: int
+    contains_sequence_id: Callable[[str], bool]
+    sequence_id_to_index: Callable[[str], int]
+    entry: Callable[[int], FastaEntry]
+
+    _id_map: dict[str, int]|None
+    _sequences: npt.NDArray[np.object_]|None
+
+    def __init__(
+        self,
+        fasta_db_path: Union[str, Path],
+        load_id_map_into_memory: bool = False,
+        load_sequences_into_memory: bool = False,
+    ):
         super().__init__(fasta_db_path)
         self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+
+        if load_sequences_into_memory:
+            self._sequences = sequences = np.empty((self.length,), dtype=np.object_)
+            for i in range(self.length):
+                self._sequences[i] = FastaEntry.deserialize(self.db[str(i)])
+            self.entry = lambda index: sequences[index]
+        else:
+            self._sequences = None
+            self.entry = lambda index: FastaEntry.deserialize(self.db[str(index)])
+
+        if load_id_map_into_memory:
+            self._id_map = id_map = {self.entry(i).identifier: i for i in range(self.length)}
+            self.contains_sequence_id = lambda sequence_id: (sequence_id in id_map) # type: ignore
+            self.sequence_id_to_index = lambda sequence_id: id_map[sequence_id] # type: ignore
+        else:
+            self._id_map = None
+            self.contains_sequence_id = lambda sequence_id: f"id_{sequence_id}" in self.db
+            self.sequence_id_to_index = lambda sequence_id: np.frombuffer(self.db[f"id_{sequence_id}"], dtype=np.int32, count=1)[0]
 
     def __len__(self):
         return self.length
 
+    def contains_index(self, sequence_index: int) -> bool:
+        return sequence_index < self.length
+
+    def index_to_sequence_id(self, sequence_index: int) -> str:
+        return self.entry(sequence_index).identifier
+
     @singledispatchmethod
-    def __contains__(self, sequence_index: int_t) -> bool:
-        return str(sequence_index) in self.db
+    def __contains__(self, sequence_index: int) -> bool:
+        return self.contains_index(sequence_index)
 
     @__contains__.register
     def _(self, sequence_id: str) -> bool:
-        return f"id_{sequence_id}" in self.db
+        return self.contains_sequence_id(sequence_id)
 
     @__contains__.register
     def _(self, entry: FastaEntry) -> bool:
-        return entry.identifier in self
+        return self.contains_sequence_id(entry.identifier)
 
     def __iter__(self):
         for i in range(len(self)):
             yield self[i]
 
     @singledispatchmethod
-    def __getitem__(self, sequence_index: int_t) -> FastaEntry:
-        return FastaEntry.deserialize(self.db[str(sequence_index)])
+    def __getitem__(self, sequence_index: int) -> FastaEntry:
+        return self.entry(sequence_index)
 
     @__getitem__.register
     def _(self, sequence_id: str) -> FastaEntry:
-        index = np.frombuffer(self.db[f"id_{sequence_id}"], dtype=np.int32, count=1)[0]
-        return self[index]
+        return self.entry(self.sequence_id_to_index(sequence_id))
+
+    def mappings(
+        self,
+        fasta_mapping_db_path: Union[str, Path],
+        load_into_memory: bool = False
+    ) -> "Tuple[FastaMappingEntry, ...]":
+        return FastaMappingDb(fasta_mapping_db_path, self, load_into_memory).entries
 
 
-class FastaIndexDbFactory(DbFactory):
-    """
-    A factory for creating a FastaIndexDb.
-    """
-    def __init__(self, path: Union[str, Path], chunk_size: int = 10000):
-        super().__init__(path, chunk_size)
-        self.num_entries = np.int64(0)
+class FastaMappingEntryFactory:
+    def __init__(self, name: str, fasta_mapping_db_factory: "FastaMappingDbFactory"):
+        self.name = name
+        self.fasta_mapping_db_factory = fasta_mapping_db_factory
+        self.sequence_indices: list[int] = []
 
-    def write_entry(self, fasta_entry_or_fasta_id: Union[str, FastaEntry], key: Optional[str] = None):
-        if isinstance(fasta_entry_or_fasta_id, FastaEntry):
-            fasta_identifier = fasta_entry_or_fasta_id.identifier
+    def write_entry(self, entry: FastaEntry, abundance: int = 1):
+        index = self.fasta_mapping_db_factory.fasta_db.sequence_id_to_index(entry.identifier)
+        insert_index = bisect.bisect_right(self.sequence_indices, index)
+        for i in range(abundance):
+            self.sequence_indices.insert(insert_index+i, index)
+
+    def write_entries(self, entries: Iterable[FastaEntry]):
+        for entry in entries:
+            self.write_entry(entry)
+
+    def __enter__(self) -> "FastaMappingEntryFactory":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.fasta_mapping_db_factory.write_entry(self)
+
+
+class FastaMappingEntry(ISample[FastaEntry]):
+
+    _sequence_indices: npt.NDArray[np.uint32]|None
+
+    def __init__(
+        self,
+        index: int,
+        fasta_mapping_db: "FastaMappingDb",
+        load_into_memory: bool = False,
+    ):
+        self.index = index
+        self.fasta_mapping_db = fasta_mapping_db
+        self.name = self.fasta_mapping_db.db[f"{index}_name"].decode()
+        self.length = np.frombuffer(self.fasta_mapping_db.db[f"{index}_length"], dtype=np.int32, count=1)[0]
+
+        if load_into_memory:
+            self._sequence_indices = sequence_indices = np.empty(self.length, dtype=np.uint32)
+            for i in range(self.length):
+                self._sequence_indices[i] = np.frombuffer(self.fasta_mapping_db.db[f"{index}_{i}"], dtype=np.uint32, count=1)[0]
+            self.sequence_index = lambda mapped_sequence_index: sequence_indices[mapped_sequence_index]
         else:
-            fasta_identifier = fasta_entry_or_fasta_id
+            self._sequence_indices = None
+            self.sequence_index = lambda mapped_sequence_index: np.frombuffer(self.fasta_mapping_db.db[f"{index}_{mapped_sequence_index}"], dtype=np.uint32, count=1)[0]
 
-        self.write(f"id_{fasta_identifier}", np.int64(self.num_entries).tobytes())
-        self.write(str(self.num_entries), fasta_identifier.encode())
-        if key is not None:
-            self.write(f"key_{key}", np.int64(self.num_entries).tobytes())
-            self.write(f"key_index_{self.num_entries}", key.encode())
+    @singledispatchmethod
+    def __contains__(self, sequence_index: int) -> bool:
+        if self._sequence_indices is not None:
+            return sequence_index == np.searchsorted(self._sequence_indices, sequence_index)
+        low = 0
+        high = self.length - 1
+        while low <= high:
+            mid = (low + high) // 2
+            mid_val = self.sequence_index(mid)
+            if mid_val < sequence_index:
+                low = mid + 1
+            elif mid_val > sequence_index:
+                high = mid - 1
+            else:
+                return True
+        return False
+
+    @__contains__.register
+    def _(self, sequence_id: str) -> bool:
+        sequence_index = self.fasta_mapping_db.fasta_db.sequence_id_to_index(sequence_id)
+        return sequence_index in self
+
+    @__contains__.register
+    def _(self, entry: FastaEntry) -> bool:
+        return entry.identifier in self
+
+    @singledispatchmethod
+    def __getitem__(self, mapped_sequence_index: int) -> FastaEntry:
+        return self.fasta_mapping_db.fasta_db.entry(self.sequence_index(mapped_sequence_index))
+
+    @__getitem__.register
+    def _(self, sequence_id: str) -> FastaEntry:
+        return self.fasta_mapping_db.fasta_db[sequence_id]
+
+    def __iter__(self) -> Generator[FastaEntry, None, None]:
+        for i in range(self.length):
+            yield self[i]
+
+    def __len__(self) -> int:
+        return self.length
+
+
+class FastaMappingDbFactory(DbFactory):
+    def __init__(self, path: Union[str, Path], fasta_db: FastaDb, chunk_size: int = 10000):
+        super().__init__(path, chunk_size)
+        self.fasta_db = fasta_db
+        self.num_entries = np.int32(0)
+        self.write("fasta_db_uuid", self.fasta_db.uuid.bytes)
+
+    def create_entry(self, name: str) -> FastaMappingEntryFactory:
+        return FastaMappingEntryFactory(name, self)
+
+    def write_entry(self, entry: FastaMappingEntryFactory):
+        self.write(f"{self.num_entries}_name", entry.name.encode())
+        self.write(f"{self.num_entries}_length", np.int32(len(entry.sequence_indices)).tobytes())
+        for i, index in enumerate(np.array(entry.sequence_indices, dtype=np.uint32)):
+            self.write(f"{self.num_entries}_{i}", index.tobytes())
         self.num_entries += 1
 
-    def write_entries(self, fasta_entries_or_fasta_ids: Iterable[Union[str, FastaEntry]]):
-        for entry in fasta_entries_or_fasta_ids:
+    def write_entries(self, entries: Iterable[FastaMappingEntryFactory]):
+        for entry in entries:
             self.write_entry(entry)
 
     def before_close(self):
         self.write("length", self.num_entries.tobytes())
-        return super().before_close()
+        super().before_close()
 
 
-class FastaIndexDb(DbWrapper):
-    """
-    An LMDB-backed database maintaining an index that maps indices/keys to FASTA identifiers.
-    """
-    def __init__(self, path: Union[str, Path]):
+class FastaMappingDb(DbWrapper):
+    def __init__(
+        self,
+        path: Union[str, Path],
+        fasta_db: FastaDb,
+        load_into_memory: bool = False
+    ):
         super().__init__(path)
-        self.length = np.frombuffer(self.db["length"], dtype=np.int64, count=1)[0]
+        assert fasta_db.uuid.bytes == self.db["fasta_db_uuid"], "This FASTA Mapping was not created with the given FASTA DB."
+        self.fasta_db = fasta_db
+        self.length = np.frombuffer(self.db["length"], dtype=np.int32, count=1)[0]
+        self.entries = tuple(FastaMappingEntry(i, self, load_into_memory) for i in range(self.length))
 
-    def contains_fasta_id(self, fasta_id: str) -> bool:
-        return f"id_{fasta_id}" in self.db
-
-    def contains_index(self, index: int) -> bool:
-        return index >= 0 and index < self.length
-
-    def contains_key(self, key: str) -> bool:
-        return f"key_{key}" in self.db
-
-    def fasta_id_to_index(self, fasta_id: str) -> int:
-        return np.frombuffer(self.db[f"id_{fasta_id}"], dtype=np.int64, count=1)[0]
-
-    def fasta_id_to_key(self, fasta_id: str) -> str:
-        return self.index_to_key(self.fasta_id_to_index(fasta_id))
-
-    def index_to_fasta_id(self, index: int) -> str:
-        return self.db[str(index)].decode()
-
-    def index_to_key(self, index: int) -> str:
-        return self.db[f"key_index_{index}"].decode()
-
-    def key_to_fasta_id(self, key: str) -> str:
-        return self.index_to_fasta_id(self.key_to_index(key))
-
-    def key_to_index(self, key: str) -> int:
-        return np.frombuffer(self.db[f"key_{key}"], dtype=np.int64, count=1)[0]
+    def __getitem__(self, index: int) -> FastaMappingEntry:
+        return self.entries[index]
 
     def __len__(self):
         return self.length
-
 
 def entries(
     sequences: Union[io.TextIOBase, Iterable[FastaEntry], str, Path]
@@ -202,23 +313,23 @@ def entries(
         yield from sequences
 
 
-def entries_with_taxonomy(
-    sequences: Iterable[FastaEntry],
-    taxonomies: Iterable[TaxonomyEntry],
-) -> Generator[Tuple[FastaEntry, TaxonomyEntry], None, None]:
-    """
-    Efficiently iterate over a FASTA file with a corresponding taxonomy file
-    """
-    labels = {}
-    taxonomy_iterator = iter(taxonomies)
-    taxonomy: TaxonomyEntry
-    for sequence in sequences:
-        while sequence.identifier not in labels:
-            taxonomy = next(taxonomy_iterator)
-            labels[taxonomy.identifier] = taxonomy
-        taxonomy = labels[sequence.identifier]
-        del labels[sequence.identifier]
-        yield sequence, taxonomy
+# def entries_with_taxonomy(
+#     sequences: Iterable[FastaEntry],
+#     taxonomies: Iterable[TaxonomyEntry],
+# ) -> Generator[Tuple[FastaEntry, TaxonomyEntry], None, None]:
+#     """
+#     Efficiently iterate over a FASTA file with a corresponding taxonomy file
+#     """
+#     labels = {}
+#     taxonomy_iterator = iter(taxonomies)
+#     taxonomy: TaxonomyEntry
+#     for sequence in sequences:
+#         while sequence.identifier not in labels:
+#             taxonomy = next(taxonomy_iterator)
+#             labels[taxonomy.identifier] = taxonomy
+#         taxonomy = labels[sequence.identifier]
+#         del labels[sequence.identifier]
+#         yield sequence, taxonomy
 
 
 def read(buffer: io.TextIOBase) -> Generator[FastaEntry, None, None]:
