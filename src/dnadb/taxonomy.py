@@ -181,6 +181,15 @@ class TaxonomyTree:
                 head = head.parent
             return taxon_ids
 
+        @property
+        def taxonomy_ids(self) -> Tuple[int, ...]:
+            head = self
+            taxonomy_ids: Tuple[int, ...] = ()
+            while head.rank != -1:
+                taxonomy_ids = (head.taxonomy_id,) + taxonomy_ids
+                head = head.parent
+            return taxonomy_ids
+
         def __contains__(self, label_or_taxon_id: Union[str, int]) -> bool:
             if isinstance(label_or_taxon_id, str):
                 return label_or_taxon_id in self.child_ids
@@ -294,7 +303,7 @@ class TaxonomyTree:
         taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
     ) -> "TaxonomyTree.Taxon":
         if isinstance(taxonomy, int):
-            return self.taxonomy_id_map[self.depth - 1][taxonomy]
+            return self.taxonomy_id_map[-1][taxonomy]
         if isinstance(taxonomy, TaxonomyEntry):
             taxonomy = taxonomy.label
         if isinstance(taxonomy, str):
@@ -331,8 +340,18 @@ class TaxonomyTree:
     ) -> "TaxonomyTree.Taxon":
         return self.taxonomy(taxonomy)
 
+    def __len__(self) -> int:
+        return len(self.taxonomy_id_map[-1])
+
     def __iter__(self) -> Iterator["TaxonomyTree.Taxon"]:
-        return iter(self.taxonomy_id_map[self.depth - 1])
+        return iter(self.taxonomy_id_map[-1])
+
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
+        result = np.empty(np.product(shape), dtype=object)
+        result[:] = list(map(
+            lambda i: self.taxonomy_id_map[-1][i],
+            rng.choice(len(self), len(result), replace=True)))
+        return result.reshape(shape)
 
 
 @dataclass(frozen=True)
@@ -414,10 +433,10 @@ class TaxonomyDb(DbWrapper):
         SequenceIdMaps = enum.auto()
         All = SequencesWithTaxonomy | SequenceLabels | SequenceIdMaps
 
-    _sequences_with_label: Dict[int, npt.NDArray[np.int32]]|None = None # label_id -> sequence_indices
-    _sequence_labels: Dict[int, int]|None = None                        # sequence_index -> label_id
-    _sequence_id_to_index: Dict[str, int]|None = None                   # sequence_id -> sequence_index
-    _sequence_index_to_id: Dict[int, str]|None = None                   # sequence_index -> sequence_id
+    _sequences_with_label: List[npt.NDArray[np.int32]]|None = None # label_id -> sequence_indices
+    _sequence_labels: Dict[int, int]|None = None                   # sequence_index -> label_id
+    _sequence_id_to_index: Dict[str, int]|None = None              # sequence_id -> sequence_index
+    _sequence_index_to_id: Dict[int, str]|None = None              # sequence_index -> sequence_id
 
     def __init__(
         self,
@@ -434,9 +453,9 @@ class TaxonomyDb(DbWrapper):
         self.num_labels = np.frombuffer(self.db["num_labels"], dtype=np.int32)[0]
 
         if TaxonomyDb.InMemory.SequencesWithTaxonomy in in_memory:
-            self._sequences_with_label = {}
+            self._sequences_with_label = []
             for i in range(self.num_labels):
-                self._sequences_with_label[i] = np.frombuffer(self.db[f"sequences_{i}"], dtype=np.int32)
+                self._sequences_with_label.append(np.frombuffer(self.db[f"sequences_{i}"], dtype=np.int32))
 
         if TaxonomyDb.InMemory.SequenceLabels in in_memory:
             self._sequence_labels = {}
@@ -486,13 +505,14 @@ class TaxonomyDb(DbWrapper):
             return sequence_id in self._sequence_id_to_index
         return f"sequence_{sequence_id}" in self.db
 
+    def sequence_indices_with_taxonomy_id(self, taxonomy_id: int) -> npt.NDArray[np.int32]:
+        if self._sequences_with_label is not None:
+            return self._sequences_with_label[taxonomy_id]
+        return np.frombuffer(self.db[f"sequences_{taxonomy_id}"], dtype=np.int32)
+
     @singledispatchmethod
     def sequences_with_taxonomy(self, taxonomy_id: int) -> Generator[TaxonomyDbEntry, None, None]:
-        if self._sequences_with_label is not None:
-            sequence_indices = self._sequences_with_label[taxonomy_id]
-        else:
-            sequence_indices = np.frombuffer(self.db[f"sequences_{taxonomy_id}"], dtype=np.int32)
-        for i in sequence_indices:
+        for i in self.sequence_indices_with_taxonomy_id(taxonomy_id):
             yield TaxonomyDbEntry(self, i, taxonomy_id)
 
     @sequences_with_taxonomy.register
@@ -521,6 +541,16 @@ class TaxonomyDb(DbWrapper):
     def __iter__(self) -> Iterator[TaxonomyDbEntry]:
         for i in range(self.num_sequences):
             yield self[i]
+
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
+        """
+        Sample sequences from the FASTA database.
+        """
+        result = np.empty(np.product(shape), dtype=object)
+        result[:] = list(map(
+            lambda i: TaxonomyDbEntry(self, rng.choice(self.sequence_indices_with_taxonomy_id(i)), i), # type: ignore
+            rng.choice(self.num_labels, len(result), replace=True)))
+        return result.reshape(shape)
 
 T = TypeVar("T", bound=ITaxonomyEntry)
 def entries(

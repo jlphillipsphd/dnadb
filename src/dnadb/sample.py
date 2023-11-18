@@ -1,5 +1,6 @@
 import abc
-from typing import Generator, Generic, TypeVar
+import numpy as np
+from typing import Generator, Generic, Tuple, TypeVar, Union
 
 from .dna import AbstractSequenceWrapper
 
@@ -7,6 +8,12 @@ T = TypeVar("T", bound=AbstractSequenceWrapper)
 class ISample(abc.ABC, Generic[T]):
 
     name: str
+
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> T:
+        """
+        Sample sequences from the sample.
+        """
+        raise NotImplementedError()
 
     def __contains__(self, sequence_index: int) -> bool:
         """

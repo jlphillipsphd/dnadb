@@ -175,6 +175,14 @@ class FastqDb(ISample[FastqEntry], DbWrapper):
     def __getitem__(self, sequence_index: int_t) -> FastqEntry:
         return FastqEntry.deserialize(self.db[str(sequence_index)])
 
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
+        """
+        Sample sequences from the FASTA database.
+        """
+        result = np.empty(np.product(shape), dtype=object)
+        result[:] = list(map(self.__getitem__, rng.choice(self.length, len(result), replace=True)))
+        return result.reshape(shape)
+
 
 def entries(
     sequences: Union[io.TextIOBase, Iterable[FastqEntry], str, Path]

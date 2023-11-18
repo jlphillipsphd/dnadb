@@ -163,6 +163,14 @@ class FastaDb(ISample[FastaEntry], DbWrapper):
     ) -> "Tuple[FastaMappingEntry, ...]":
         return FastaMappingDb(fasta_mapping_db_path, self, load_into_memory).entries
 
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
+        """
+        Sample sequences from the FASTA database.
+        """
+        result = np.empty(np.product(shape), dtype=object)
+        result[:] = list(map(self.entry, rng.choice(self.length, len(result), replace=True)))
+        return result.reshape(shape)
+
 
 class FastaMappingEntryFactory:
     def __init__(self, name: str, fasta_mapping_db_factory: "FastaMappingDbFactory"):
@@ -211,6 +219,9 @@ class FastaMappingEntry(ISample[FastaEntry]):
             self._sequence_indices = None
             self.sequence_index = lambda mapped_sequence_index: np.frombuffer(self.fasta_mapping_db.db[f"{index}_{mapped_sequence_index}"], dtype=np.uint32, count=1)[0]
 
+    def entry(self, mapped_sequence_index: int) -> FastaEntry:
+        return self.fasta_mapping_db.fasta_db.entry(self.sequence_index(mapped_sequence_index))
+
     @singledispatchmethod
     def __contains__(self, sequence_index: int) -> bool:
         if self._sequence_indices is not None:
@@ -239,7 +250,7 @@ class FastaMappingEntry(ISample[FastaEntry]):
 
     @singledispatchmethod
     def __getitem__(self, mapped_sequence_index: int) -> FastaEntry:
-        return self.fasta_mapping_db.fasta_db.entry(self.sequence_index(mapped_sequence_index))
+        return self.entry(mapped_sequence_index)
 
     @__getitem__.register
     def _(self, sequence_id: str) -> FastaEntry:
@@ -251,6 +262,14 @@ class FastaMappingEntry(ISample[FastaEntry]):
 
     def __len__(self) -> int:
         return self.length
+
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
+        """
+        Sample sequences from the FASTA database.
+        """
+        result = np.empty(np.product(shape), dtype=object)
+        result[:] = list(map(self.entry, rng.choice(self.length, len(result), replace=True)))
+        return result.reshape(shape)
 
 
 class FastaMappingDbFactory(DbFactory):
