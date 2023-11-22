@@ -190,6 +190,13 @@ class TaxonomyTree:
                 head = head.parent
             return taxonomy_ids
 
+        def truncate(self, rank: int) -> "TaxonomyTree.Taxon":
+            assert rank >= 0 and rank <= self.rank, "Invalid rank"
+            head = self
+            while head.rank > rank:
+                head = head.parent
+            return head
+
         def __contains__(self, label_or_taxon_id: Union[str, int]) -> bool:
             if isinstance(label_or_taxon_id, str):
                 return label_or_taxon_id in self.child_ids
