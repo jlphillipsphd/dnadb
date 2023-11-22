@@ -255,6 +255,16 @@ class TestTaxonomyTree(unittest.TestCase):
             for t1, t2 in zip(self.tree.id_to_taxon_map[depth], sorted(self.tree.id_to_taxon_map[depth])):
                 self.assertEqual(t1, t2)
 
+    def test_taxonomy_sorted_order(self):
+        for depth in range(self.tree.depth):
+            for t1, t2 in zip(self.tree.taxonomy_id_map[depth], sorted(self.tree.taxonomy_id_map[depth], key=lambda x: x.taxonomy_id)):
+                self.assertEqual(t1, t2)
+
+    def test_taxonomy_parent_sorted_order(self):
+        for depth in range(1, self.tree.depth):
+            parents = [t.parent.taxonomy_id for t in self.tree.taxonomy_id_map[depth]]
+            self.assertEqual(parents, sorted(parents))
+
     def test_has_taxonomy(self):
         for entry in self.taxonomy_entries:
             self.assertTrue(self.tree.has_taxonomy(entry), "TaxonomyEntry")

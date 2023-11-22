@@ -133,7 +133,7 @@ class TaxonomyTree:
 
     @dataclass(frozen=True)
     class Taxon:
-        label: str = field(compare=False, hash=False)
+        taxon_label: str = field(compare=False, hash=False)
         rank: int = field(compare=True, hash=False)
         taxon_id: int = field(compare=True)
         taxonomy_id: int = field(compare=False, hash=False)
@@ -141,8 +141,8 @@ class TaxonomyTree:
         children: Dict[int, "TaxonomyTree.Taxon"] = field(default_factory=dict, compare=False, hash=False)
         child_ids: Dict[str, int] = field(default_factory=dict, compare=False, hash=False)
 
-        def __init__(self, label: str, taxon_id: int = -1, taxonomy_id: int = -1, parent: Optional["TaxonomyTree.Taxon"] = None):
-            object.__setattr__(self, "label", label)
+        def __init__(self, taxon_label: str, taxon_id: int = -1, taxonomy_id: int = -1, parent: Optional["TaxonomyTree.Taxon"] = None):
+            object.__setattr__(self, "taxon_label", taxon_label)
             object.__setattr__(self, "rank", parent.rank+1 if parent is not None else -1)
             object.__setattr__(self, "taxon_id", taxon_id)
             object.__setattr__(self, "taxonomy_id", taxonomy_id)
@@ -151,12 +151,12 @@ class TaxonomyTree:
             object.__setattr__(self, "child_ids", {})
             if self.parent is not None:
                 self.parent.children[taxon_id] = self
-                self.parent.child_ids[label] = self.taxon_id
+                self.parent.child_ids[taxon_label] = self.taxon_id
 
-        def add_child(self, label: str, taxon_id: int, taxonomy_id: int) -> "TaxonomyTree.Taxon":
-            assert label not in self.child_ids, f"Taxon {label} already exists"
-            self.children[taxon_id] = TaxonomyTree.Taxon(label, taxon_id, taxonomy_id, self)
-            self.child_ids[label] = taxon_id
+        def add_child(self, taxon_label: str, taxon_id: int, taxonomy_id: int) -> "TaxonomyTree.Taxon":
+            assert taxon_label not in self.child_ids, f"Taxon {repr(taxon_label)} already exists"
+            self.children[taxon_id] = TaxonomyTree.Taxon(taxon_label, taxon_id, taxonomy_id, self)
+            self.child_ids[taxon_label] = taxon_id
             return self.children[taxon_id]
 
         @property
@@ -168,7 +168,7 @@ class TaxonomyTree:
             head = self
             taxons: Tuple[str, ...] = ()
             while head.rank != -1:
-                taxons = (head.label,) + taxons
+                taxons = (head.taxon_label,) + taxons
                 head = head.parent
             return taxons
 
@@ -208,7 +208,7 @@ class TaxonomyTree:
 
         def __repr__(self) -> str:
             params = [
-                "label=" + repr(self.label),
+                "taxon_label=" + repr(self.taxon_label),
             ]
             if self.rank != -1:
                 params += [
@@ -250,14 +250,16 @@ class TaxonomyTree:
         stack: List[Tuple[TaxonomyTree.Taxon, TaxonomyDict]] = [(root, tree)]
         while len(stack) > 0:
             parent, head = stack.pop()
+            s = []
             for label in head:
                 taxon_id = self.taxon_to_id_map[parent.rank + 1][label]
                 taxonomy_id = len(taxonomy_id_to_taxon_map[parent.rank+1])
                 taxon = parent.add_child(label, taxon_id, taxonomy_id)
                 taxonomy_id_to_taxon_map[parent.rank+1].append(taxon)
                 assert taxonomy_id_to_taxon_map[parent.rank+1][taxonomy_id] == taxon
-                if len(head[taxon.label]) > 0:
-                    stack.append((taxon, head[taxon.label]))
+                if len(head[taxon.taxon_label]) > 0:
+                    s.append((taxon, head[taxon.taxon_label]))
+            stack += reversed(s)
         return root, taxonomy_id_to_taxon_map
 
     def reduce_entry(self, label: TaxonomyEntry) -> TaxonomyEntry:
@@ -277,6 +279,25 @@ class TaxonomyTree:
         if pad:
             return taxons[:count] + ("",)*(len(taxons) - count)
         return taxons[:count]
+
+    def reduce_taxonomy(
+        self,
+        taxonomy: Union[TaxonomyEntry, str, int, Tuple[str, ...], Tuple[int, ...]]
+    ) -> Union["TaxonomyTree.Taxon", None]:
+        if isinstance(taxonomy, int):
+            return self.taxonomy_id_map[-1][taxonomy]
+        if isinstance(taxonomy, TaxonomyEntry):
+            taxonomy = taxonomy.label
+        if isinstance(taxonomy, str):
+            taxonomy = split_taxonomy(taxonomy, keep_empty=True)
+        head = self.tree
+        for taxon in taxonomy:
+            if taxon not in head:
+                break
+            head = head[taxon]
+        if head.rank == -1:
+            return None
+        return head
 
     def has_taxonomy(
         self,
@@ -324,8 +345,8 @@ class TaxonomyTree:
         while len(stack) > 0:
             head, tree_head = stack.pop()
             for child in head:
-                tree_head[child.label] = {}
-                stack.append((child, tree_head[child.label]))
+                tree_head[child.taxon_label] = {}
+                stack.append((child, tree_head[child.taxon_label]))
         return json.dumps(dict(depth=self.depth, tree=tree)).encode()
 
     def __contains__(
@@ -345,6 +366,9 @@ class TaxonomyTree:
 
     def __iter__(self) -> Iterator["TaxonomyTree.Taxon"]:
         return iter(self.taxonomy_id_map[-1])
+
+    def __eq__(self, other: "TaxonomyTree"):
+        return self.serialize() == other.serialize()
 
     def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
         result = np.empty(np.product(shape), dtype=object)
@@ -376,6 +400,9 @@ class TaxonomyDbEntry(ITaxonomyEntry):
     @property
     def taxonomy(self) -> "TaxonomyTree.Taxon":
         return self.db.tree.taxonomy_id_map[-1][self.label_id]
+
+    def __repr__(self) -> str:
+        return f"TaxonomyDbEntry(sequence_id={repr(self.sequence_id)}, label={repr(self.label)})"
 
 
 class TaxonomyDbFactory(DbFactory):
@@ -544,7 +571,7 @@ class TaxonomyDb(DbWrapper):
 
     def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator) -> np.ndarray:
         """
-        Sample sequences from the FASTA database.
+        Sample entries weighted by the number of sequences in each taxonomy.
         """
         result = np.empty(np.product(shape), dtype=object)
         result[:] = list(map(
