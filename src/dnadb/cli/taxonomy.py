@@ -74,7 +74,7 @@ def command_import(config: argparse.Namespace):
     fasta_db = fasta.FastaDb(config.fasta_db)
     num_skipped = 0
     num_processed = 0
-    with taxonomy.TaxonomyDbFactory(output_path, fasta.FastaDb(config.fasta_db)) as factory:
+    with taxonomy.TaxonomyDbFactory(output_path, fasta.FastaDb(config.fasta_db), depth=config.depth) as factory:
         for entry in tqdm(taxonomy.entries(config.input_path)):
             if entry.sequence_id not in fasta_db:
                 num_skipped += 1
