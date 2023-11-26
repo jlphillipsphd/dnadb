@@ -104,7 +104,7 @@ def command_info(config: argparse.Namespace):
     if config.input_path.suffix == ".db":
         db = taxonomy.TaxonomyDb(config.input_path)
         uuid = db.uuid
-        count = sum(db.count(label_index) for label_index in range(len(db)))
+        count = sum(db.count(label_index) for label_index in range(db.num_labels))
         unique_labels = len(db)
     else:
         entries = taxonomy.entries(config.input_path)
