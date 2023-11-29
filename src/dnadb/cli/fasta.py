@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+import tempfile
 from tqdm import tqdm
 from typing import Dict
 
@@ -24,6 +25,30 @@ def define_arguments(parser: argparse.ArgumentParser):
         nargs='?',
         default=None,
         help="The destination FASTA DB file.")
+
+    import_multiplexed_args = subparsers.add_parser(
+        "import-multiplexed",
+        help="Import sequences from FASTQ files into a single FASTA DB with a corresonding sample mapping.")
+    import_multiplexed_args.add_argument(
+        "--min-length",
+        type=int,
+        default=0,
+        help="The minimum length of a sequence to import.")
+    import_multiplexed_args.add_argument(
+        "--output-sequences-path",
+        type=Path,
+        required=True,
+        help="The destination FASTA DB sequences file.")
+    import_multiplexed_args.add_argument(
+        "--output-mapping-path",
+        type=Path,
+        required=True,
+        help="The destination FASTA mapping file.")
+    import_multiplexed_args.add_argument(
+        "input_sequences",
+        type=Path,
+        nargs="+",
+        help="Sample files in either FASTA or FASTQ format.")
 
     export_args = subparsers.add_parser(
         "export",
@@ -77,6 +102,82 @@ def command_import(config: argparse.Namespace):
             factory.write_entry(entry)
             num_processed += 1
     print(f"Done. Imported {num_processed:,} sequences. Skipped {num_skipped:,} sequences.")
+
+
+def command_import_multiplexed(config: argparse.Namespace):
+    print("Importing FASTA...")
+    import gzip
+    import heapq
+    from itertools import count, repeat
+    import re
+    from dnadb import fasta
+
+    num_skipped = 0
+    num_sequences = 0
+    num_processed = 0
+    with tempfile.TemporaryDirectory() as scratch_path:
+        scratch_path = Path(scratch_path)
+        sequence_files: list[Path] = config.input_sequences
+        print(f"Gathering Sequences from {len(sequence_files)} file(s)...")
+        sequence_file_ids: dict[Path, Path] = {}
+        for i, sequence_file in tqdm(enumerate(sorted(sequence_files))):
+            scratch_file = scratch_path / f"sequences_{i}"
+            sequence_file_ids[scratch_file] = sequence_file
+            if sequence_file.name.endswith(".gz"):
+                file_handle = gzip.open(sequence_file, "rt")
+            else:
+                file_handle = open(sequence_file)
+            if sequence_file.name.endswith(".fastq") or sequence_file.name.endswith(".fastq.gz"):
+                sequences = file_handle.readlines()[1::4]
+            else:
+                sequences = file_handle.readlines()[1::2]
+            file_handle.close()
+            num_processed += len(sequences)
+            sequences = sorted(filter(lambda s: len(s) >= config.min_length, sequences))
+            sequences.sort()
+            num_sequences += len(sequences)
+            with open(scratch_file, "w") as f:
+                for sequence in sequences:
+                    if len(sequence) < config.min_length:
+                        num_skipped += 1
+                        continue
+                    f.write(sequence.rstrip() + '\n')
+
+        # Create the output FASTA DB files
+        print("Creating FASTA DB...")
+        fasta_db = fasta.FastaDbFactory(config.output_sequences_path)
+        prev: str = ""
+        fasta_id_generator = count()
+        for sequence in tqdm(heapq.merge(*map(open, sequence_file_ids.keys())), total=num_sequences):
+            sequence = sequence.rstrip()
+            if sequence == prev:
+                continue
+            identifier = str(next(fasta_id_generator))
+            fasta_db.write_entry(fasta.FastaEntry(identifier, sequence))
+            prev = sequence
+        fasta_db.close()
+
+        print("Creating FASTA Mapping DB...")
+        fasta_db = fasta.FastaDb(config.output_sequences_path)
+        fasta_mapping = fasta.FastaMappingDbFactory(config.output_mapping_path, fasta_db)
+        mappings: dict[str, fasta.FastaMappingEntryFactory] = {}
+        for fastq_file in sequence_file_ids.values():
+            name = re.sub(r"(?:\.fasta|\.fastq)(?:\.gz)?$", "", fastq_file.name)
+            mappings[name] = fasta_mapping.create_entry(name)
+
+        print("Writing Sample Mappings...")
+        fasta_entries = iter(fasta_db)
+        fasta_entry = next(fasta_entries)
+        for sequence, mapping in tqdm(heapq.merge(*[zip(f, repeat(mapping)) for f, mapping in zip(map(open, sequence_file_ids.keys()), mappings)]), total=num_sequences):
+            sequence = sequence.rstrip()
+            if sequence != fasta_entry.sequence:
+                fasta_entry = next(fasta_entries)
+            assert sequence == fasta_entry.sequence
+            mappings[mapping].write_entry(fasta_entry)
+        for mapping in mappings.values():
+            fasta_mapping.write_entry(mapping)
+        fasta_mapping.close()
+    print(f"Done. Imported {num_sequences:,} sequences. Skipped {num_skipped:,} sequences.")
 
 
 def command_export(config: argparse.Namespace):
