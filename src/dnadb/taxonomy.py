@@ -413,12 +413,19 @@ class TaxonomyDbEntry(ITaxonomyEntry):
 
 
 class TaxonomyDbFactory(DbFactory):
-    def __init__(self, path: Union[str, Path], fasta_db: FastaDb, depth: int = 7):
+    def __init__(
+        self,
+        path: Union[str, Path],
+        fasta_db: FastaDb,
+        depth: int = 7,
+        tree: Optional[TaxonomyTree] = None
+    ):
         super().__init__(path)
-        self.depth = depth
+        self.depth = depth if tree is None else tree.depth
         self.fasta_db = fasta_db
         self.sequences: Dict[str, List[int]] = {}
         self.num_sequences = 0
+        self.tree = tree
 
     def write_sequence(self, sequence_id: str, label: str):
         sequence_index = self.fasta_db.sequence_id_to_index(sequence_id)
@@ -434,11 +441,17 @@ class TaxonomyDbFactory(DbFactory):
         for entry in entries:
             self.write_entry(entry)
 
-    def before_close(self):
+    def _build_tree(self) -> TaxonomyTree:
+        if self.tree is not None:
+            return self.tree
         tree = TaxonomyTreeFactory(self.depth)
         for label in self.sequences:
             tree.add_label(label)
         tree = tree.build()
+        return tree
+
+    def before_close(self):
+        tree = self._build_tree()
         self.write("fasta_uuid", self.fasta_db.uuid.bytes)
         self.write("tree", tree.serialize())
         self.write("num_sequences", np.int32(self.num_sequences).tobytes())
@@ -489,7 +502,11 @@ class TaxonomyDb(DbWrapper):
         if TaxonomyDb.InMemory.SequencesWithTaxonomy in in_memory:
             self._sequences_with_label = []
             for i in range(self.num_labels):
-                self._sequences_with_label.append(np.frombuffer(self.db[f"sequences_{i}"], dtype=np.int32))
+                if f"sequences_{i}" not in self.db:
+                    indices = np.empty(0, dtype=np.int32)
+                else:
+                    indices = np.frombuffer(self.db[f"sequences_{i}"], dtype=np.int32)
+                self._sequences_with_label.append(indices)
 
         if TaxonomyDb.InMemory.SequenceLabels in in_memory:
             self._sequence_labels = {}
@@ -542,6 +559,8 @@ class TaxonomyDb(DbWrapper):
     def sequence_indices_with_taxonomy_id(self, taxonomy_id: int) -> npt.NDArray[np.int32]:
         if self._sequences_with_label is not None:
             return self._sequences_with_label[taxonomy_id]
+        if f"sequences_{taxonomy_id}" not in self.db:
+            return np.empty(0, dtype=np.int32)
         return np.frombuffer(self.db[f"sequences_{taxonomy_id}"], dtype=np.int32)
 
     @singledispatchmethod

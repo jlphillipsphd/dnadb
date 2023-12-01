@@ -13,7 +13,8 @@ def define_arguments(parser: argparse.ArgumentParser):
     import_args.add_argument(
         "--depth",
         type=int,
-        default=None)
+        default=None,
+        required=True)
     import_args.add_argument(
         "--fasta-db",
         type=Path,
@@ -105,7 +106,7 @@ def command_info(config: argparse.Namespace):
         db = taxonomy.TaxonomyDb(config.input_path)
         uuid = db.uuid
         count = sum(db.count(label_index) for label_index in range(db.num_labels))
-        unique_labels = len(db)
+        unique_labels = db.num_labels
     else:
         entries = taxonomy.entries(config.input_path)
         count = 0
