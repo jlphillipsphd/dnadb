@@ -5,7 +5,7 @@ import io
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
-from typing import Callable, Generator, Iterable, Tuple, Union
+from typing import Callable, Dict, Generator, Iterable, Optional, Tuple, Union
 
 from .db import DbFactory, DbWrapper
 from .dna import AbstractSequenceWrapper
@@ -93,8 +93,8 @@ class FastaDb(ISample[FastaEntry], DbWrapper):
     sequence_id_to_index: Callable[[str], int]
     entry: Callable[[int], FastaEntry]
 
-    _id_map: dict[str, int]|None
-    _sequences: npt.NDArray[np.object_]|None
+    _id_map: Optional[Dict[str, int]]
+    _sequences: Optional[npt.NDArray[np.object_]]
 
     def __init__(
         self,
@@ -197,7 +197,7 @@ class FastaMappingEntryFactory:
 
 class FastaMappingEntry(ISample[FastaEntry]):
 
-    _sequence_indices: npt.NDArray[np.uint32]|None
+    _sequence_indices: Optional[npt.NDArray[np.uint32]]
 
     def __init__(
         self,

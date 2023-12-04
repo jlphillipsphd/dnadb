@@ -480,10 +480,10 @@ class TaxonomyDb(DbWrapper):
         SequenceIdMaps = enum.auto()
         All = SequencesWithTaxonomy | SequenceLabels | SequenceIdMaps
 
-    _sequences_with_label: List[npt.NDArray[np.int32]]|None = None # label_id -> sequence_indices
-    _sequence_labels: Dict[int, int]|None = None                   # sequence_index -> label_id
-    _sequence_id_to_index: Dict[str, int]|None = None              # sequence_id -> sequence_index
-    _sequence_index_to_id: Dict[int, str]|None = None              # sequence_index -> sequence_id
+    _sequences_with_label: Optional[List[npt.NDArray[np.int32]]] = None # label_id -> sequence_indices
+    _sequence_labels: Optional[Dict[int, int]] = None                   # sequence_index -> label_id
+    _sequence_id_to_index: Optional[Dict[str, int]] = None              # sequence_id -> sequence_index
+    _sequence_index_to_id: Optional[Dict[int, str]] = None              # sequence_index -> sequence_id
 
     def __init__(
         self,
@@ -608,7 +608,7 @@ class TaxonomyDb(DbWrapper):
 T = TypeVar("T", bound=ITaxonomyEntry)
 def entries(
     taxonomy: Union[io.TextIOBase, Iterable[T], str, Path],
-    header: bool|Literal["auto"] = "auto"
+    header: Union[bool,Literal["auto"]] = "auto"
 ) -> Generator[TaxonomyEntry, None, None]:
     """
     Create an Iterable over a taxonomy file or iterable of taxonomy entries.
@@ -624,7 +624,7 @@ def entries(
 
 def read(
     buffer: io.TextIOBase,
-    header: bool|Literal["auto"] = "auto"
+    header: Union[bool,Literal["auto"]] = "auto"
 ) -> Generator[TaxonomyEntry, None, None]:
     """
     Read taxonomies from a tab-separated file (TSV)
