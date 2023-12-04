@@ -13,8 +13,6 @@ class DbFactory:
     """
     def __init__(self, path: Union[str, Path], chunk_size: int_t = 10000):
         self.path = Path(path)
-        if self.path.suffix != ".db":
-            self.path = Path(str(self.path) + ".db")
         self.db = Lmdb.open(str(self.path), "n", lock=True)
         self.buffer: dict[Union[str, bytes], bytes] = {}
         self.chunk_size = chunk_size
