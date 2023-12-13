@@ -42,7 +42,7 @@ def join_taxonomy(taxonomy: Union[Tuple[str, ...], List[str]], depth: Optional[i
         depth = len(taxonomy)
     assert depth >= 1 and depth <= len(RANKS), "Invalid taxonomy"
     taxonomy = tuple(taxonomy) + ("",)*(depth - len(taxonomy))
-    return "; ".join([f"{RANK_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
+    return ";".join([f"{RANK_PREFIXES[i]}__{taxon}" for i, taxon in enumerate(taxonomy)])
 
 
 @overload
