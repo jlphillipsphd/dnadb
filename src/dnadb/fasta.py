@@ -178,11 +178,17 @@ class FastaMappingEntryFactory:
         self.fasta_mapping_db_factory = fasta_mapping_db_factory
         self.sequence_indices: list[int] = []
 
-    def write_entry(self, entry: FastaEntry, abundance: int = 1):
-        index = self.fasta_mapping_db_factory.fasta_db.sequence_id_to_index(entry.identifier)
-        insert_index = bisect.bisect_right(self.sequence_indices, index)
+    def write_sequence_index(self, sequence_index: int, abundance: int = 1):
+        insert_index = bisect.bisect_right(self.sequence_indices, sequence_index)
         for i in range(abundance):
-            self.sequence_indices.insert(insert_index+i, index)
+            self.sequence_indices.insert(insert_index+i, sequence_index)
+
+    def write_sequence_id(self, sequence_id: str, abundance: int = 1):
+        sequence_index = self.fasta_mapping_db_factory.fasta_db.sequence_id_to_index(sequence_id)
+        self.write_sequence_index(sequence_index, abundance)
+
+    def write_entry(self, entry: FastaEntry, abundance: int = 1):
+        self.write_sequence_id(entry.identifier, abundance)
 
     def write_entries(self, entries: Iterable[FastaEntry]):
         for entry in entries:
