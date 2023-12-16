@@ -424,7 +424,7 @@ class TaxonomyDbFactory(DbFactory):
         self.depth = depth if tree is None else tree.depth
         self.fasta_db = fasta_db
         self.sequences: Dict[str, List[int]] = {}
-        self.num_sequences = 0
+        self.num_sequences: int = 0
         self.tree = tree
 
     def write_sequence(self, sequence_id: str, label: str):
@@ -496,8 +496,8 @@ class TaxonomyDb(DbWrapper):
         if self.fasta_db is not None:
             assert self.fasta_db.uuid.bytes == self.db["fasta_uuid"], "FASTA DB UUID does not match"
         self.tree = TaxonomyTree.deserialize(self.db["tree"])
-        self.num_sequences = np.frombuffer(self.db["num_sequences"], dtype=np.int32)[0]
-        self.num_labels = np.frombuffer(self.db["num_labels"], dtype=np.int32)[0]
+        self.num_sequences: int = np.frombuffer(self.db["num_sequences"], dtype=np.int32)[0]
+        self.num_labels: int = np.frombuffer(self.db["num_labels"], dtype=np.int32)[0]
 
         if TaxonomyDb.InMemory.SequencesWithTaxonomy in in_memory:
             self._sequences_with_label = []

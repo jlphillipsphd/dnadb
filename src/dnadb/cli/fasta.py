@@ -133,7 +133,6 @@ def command_import_multiplexed(config: argparse.Namespace):
                 sequences = file_handle.readlines()[1::2]
             file_handle.close()
             num_processed += len(sequences)
-            sequences = sorted(filter(lambda s: len(s) >= config.min_length, sequences))
             sequences.sort()
             num_sequences += len(sequences)
             with open(scratch_file, "w") as f:

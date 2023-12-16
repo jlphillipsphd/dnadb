@@ -323,6 +323,7 @@ class FastaMappingDb(DbWrapper):
     def __len__(self):
         return self.length
 
+
 def entries(
     sequences: Union[io.TextIOBase, Iterable[FastaEntry], str, Path]
 ) -> Iterable[FastaEntry]:
