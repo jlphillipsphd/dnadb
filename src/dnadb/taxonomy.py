@@ -1,7 +1,7 @@
 import bisect
 from dataclasses import dataclass, field, replace
 import enum
-from functools import singledispatchmethod
+from functools import cached_property, singledispatchmethod
 import io
 import json
 import numpy as np
@@ -159,11 +159,17 @@ class TaxonomyTree:
             self.child_ids[taxon_label] = taxon_id
             return self.children[taxon_id]
 
-        @property
+        @cached_property
+        def num_taxonomies(self) -> int:
+            if len(self.children) == 0:
+                return 1
+            return sum(child.num_taxonomies for child in self.children.values())
+
+        @cached_property
         def taxonomy_label(self) -> str:
             return join_taxonomy(self.taxons)
 
-        @property
+        @cached_property
         def taxons(self) -> Tuple[str, ...]:
             head = self
             taxons: Tuple[str, ...] = ()
@@ -172,7 +178,7 @@ class TaxonomyTree:
                 head = head.parent
             return taxons
 
-        @property
+        @cached_property
         def taxon_ids(self) -> Tuple[int, ...]:
             head = self
             taxon_ids: Tuple[int, ...] = ()
@@ -181,7 +187,7 @@ class TaxonomyTree:
                 head = head.parent
             return taxon_ids
 
-        @property
+        @cached_property
         def taxonomy_ids(self) -> Tuple[int, ...]:
             head = self
             taxonomy_ids: Tuple[int, ...] = ()
@@ -189,6 +195,15 @@ class TaxonomyTree:
                 taxonomy_ids = (head.taxonomy_id,) + taxonomy_ids
                 head = head.parent
             return taxonomy_ids
+
+        @cached_property
+        def taxonomy_id_range(self) -> range:
+            head = self
+            while len(head.children) > 0:
+                head = head.children[min(head.children)]
+            start = head.taxonomy_id
+            end = start + self.num_taxonomies
+            return range(start, end)
 
         def truncate(self, rank: int) -> "TaxonomyTree.Taxon":
             assert rank >= 0 and rank <= self.rank, "Invalid rank"
@@ -397,7 +412,7 @@ class TaxonomyDbEntry(ITaxonomyEntry):
         return self.db.fasta_db[self.sequence_index]
 
     @property
-    def label(self):
+    def label(self) -> str:
         return self.taxonomy.taxonomy_label
 
     @property

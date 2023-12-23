@@ -29,14 +29,14 @@ AAAGGTTCAGTGGCGCAAGGCTAAAACTCAAAGGAATTGACGGGGGCCCGCACAAGCGGTGGAGCATGTGGTTTAATTCG
 """
 
 TAXONOMY_SAMPLE = """\
-AY855839.1.1390\td__Bacteria; p__; c__; o__; f__; g__; s__
-FW343016.1.1511\td__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__
-AY835431.189876.191345\td__Bacteria; p__Cyanobacteria; c__; o__; f__; g__; s__
-FW369114.1.1462\td__Bacteria; p__Proteobacteria; c__Alphaproteobacteria; o__; f__; g__; s__
-FW369795.1.1413\td__Bacteria; p__Proteobacteria; c__Alphaproteobacteria; o__Acetobacterales; f__; g__; s__
-AY846383.1.1790\td__Eukaryota; p__Eukaryota; c__Chlorophyceae; o__Sphaeropleales; f__Sphaeropleales; g__Monoraphidium; s__
-AB001440.1.1538\td__Bacteria; p__Proteobacteria; c__Gammaproteobacteria; o__Pseudomonadales; f__Pseudomonadaceae; g__Pseudomonas; s__test_species
-FW369795.1.xxxx\td__Bacteria; p__Proteobacteria; c__Alphaproteobacteria; o__Acetobacterales; f__; g__; s__
+AY855839.1.1390\td__Bacteria;p__;c__;o__;f__;g__;s__
+FW343016.1.1511\td__Bacteria;p__Firmicutes;c__;o__;f__;g__;s__
+AY835431.189876.191345\td__Bacteria;p__Cyanobacteria;c__;o__;f__;g__;s__
+FW369114.1.1462\td__Bacteria;p__Proteobacteria;c__Alphaproteobacteria;o__;f__;g__;s__
+FW369795.1.1413\td__Bacteria;p__Proteobacteria;c__Alphaproteobacteria;o__Acetobacterales;f__;g__;s__
+AY846383.1.1790\td__Eukaryota;p__Eukaryota;c__Chlorophyceae;o__Sphaeropleales;f__Sphaeropleales;g__Monoraphidium;s__
+AB001440.1.1538\td__Bacteria;p__Proteobacteria;c__Gammaproteobacteria;o__Pseudomonadales;f__Pseudomonadaceae;g__Pseudomonas;s__test_species
+FW369795.1.xxxx\td__Bacteria;p__Proteobacteria;c__Alphaproteobacteria;o__Acetobacterales;f__;g__;s__
 """
 
 TAXONOMY_SAMPLE_WITH_HEADER = "Sequence ID\tTaxonomy\n" + TAXONOMY_SAMPLE
@@ -44,8 +44,8 @@ TAXONOMY_SAMPLE_WITH_HEADER = "Sequence ID\tTaxonomy\n" + TAXONOMY_SAMPLE
 class TestIsTaxonomy(unittest.TestCase):
     def test_is_taxonomy(self):
         self.assertFalse(taxonomy.is_taxonomy("Taxonomy"))
-        self.assertTrue(taxonomy.is_taxonomy("d__Bacteria; p__; c__; o__; f__; g__; s__;"))
-        self.assertTrue(taxonomy.is_taxonomy("d__Bacteria; p__Proteobacteria; c__Gammaproteobacteria; o__Pseudomonadales; f__Pseudomonadaceae; g__Pseudomonas; s__test_species"))
+        self.assertTrue(taxonomy.is_taxonomy("d__Bacteria;p__;c__;o__;f__;g__;s__;"))
+        self.assertTrue(taxonomy.is_taxonomy("d__Bacteria;p__Proteobacteria;c__Gammaproteobacteria;o__Pseudomonadales;f__Pseudomonadaceae;g__Pseudomonas;s__test_species"))
 
 
 class TestTaxonomySplits(unittest.TestCase):
@@ -82,10 +82,10 @@ class TestTaxonomySplits(unittest.TestCase):
             taxonomy.join_taxonomy(["Bacteria"]), "d__Bacteria"
         )
         self.assertEqual(
-            taxonomy.join_taxonomy(["Bacteria", ""]), "d__Bacteria; p__"
+            taxonomy.join_taxonomy(["Bacteria", ""]), "d__Bacteria;p__"
         )
         self.assertEqual(
-            taxonomy.join_taxonomy(["Bacteria"], depth=2), "d__Bacteria; p__"
+            taxonomy.join_taxonomy(["Bacteria"], depth=2), "d__Bacteria;p__"
         )
 
 class TestTaxonomyReading(unittest.TestCase):
@@ -111,9 +111,9 @@ class TestTaxonomyReading(unittest.TestCase):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE)
         taxonomy_entries = list(taxonomy.read(taxonomy_file, header=False))
         self.assertEqual(taxonomy_entries[0].sequence_id, "AY855839.1.1390")
-        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria; p__; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria;p__;c__;o__;f__;g__;s__")
         self.assertEqual(taxonomy_entries[1].sequence_id, "FW343016.1.1511")
-        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria;p__Firmicutes;c__;o__;f__;g__;s__")
 
     def test_read_without_header_auto(self):
         """
@@ -122,9 +122,9 @@ class TestTaxonomyReading(unittest.TestCase):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE)
         taxonomy_entries = list(taxonomy.read(taxonomy_file, header="auto"))
         self.assertEqual(taxonomy_entries[0].sequence_id, "AY855839.1.1390")
-        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria; p__; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria;p__;c__;o__;f__;g__;s__")
         self.assertEqual(taxonomy_entries[1].sequence_id, "FW343016.1.1511")
-        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria;p__Firmicutes;c__;o__;f__;g__;s__")
 
     def test_read_with_header(self):
         """
@@ -133,9 +133,9 @@ class TestTaxonomyReading(unittest.TestCase):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE_WITH_HEADER)
         taxonomy_entries = list(taxonomy.read(taxonomy_file, header=True))
         self.assertEqual(taxonomy_entries[0].sequence_id, "AY855839.1.1390")
-        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria; p__; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria;p__;c__;o__;f__;g__;s__")
         self.assertEqual(taxonomy_entries[1].sequence_id, "FW343016.1.1511")
-        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria;p__Firmicutes;c__;o__;f__;g__;s__")
 
     def test_read_with_header_auto(self):
         """
@@ -144,9 +144,9 @@ class TestTaxonomyReading(unittest.TestCase):
         taxonomy_file = io.StringIO(TAXONOMY_SAMPLE_WITH_HEADER)
         taxonomy_entries = list(taxonomy.read(taxonomy_file, header="auto"))
         self.assertEqual(taxonomy_entries[0].sequence_id, "AY855839.1.1390")
-        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria; p__; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[0].label, "d__Bacteria;p__;c__;o__;f__;g__;s__")
         self.assertEqual(taxonomy_entries[1].sequence_id, "FW343016.1.1511")
-        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__")
+        self.assertEqual(taxonomy_entries[1].label, "d__Bacteria;p__Firmicutes;c__;o__;f__;g__;s__")
 
     def test_entries_from_path(self):
         """
@@ -222,8 +222,8 @@ class TestTaxonomyTree(unittest.TestCase):
         factory = taxonomy.TaxonomyTreeFactory(depth=7)
         factory.add_entries(self.taxonomy_entries)
         self.tree = factory.build()
-        self.invalid_label = "d__Bacteria; p__Proteobacteria; c__XYZ; o__Acetobacterales; f__; g__; s__"
-        self.test_label = "d__Bacteria; p__Proteobacteria; c__XYZ; o__; f__; g__; s__"
+        self.invalid_label = "d__Bacteria;p__Proteobacteria;c__XYZ;o__Acetobacterales;f__;g__;s__"
+        self.test_label = "d__Bacteria;p__Proteobacteria;c__XYZ;o__;f__;g__;s__"
 
     def test_taxon_depth(self):
         self.assertEqual(self.tree.depth, 7)
@@ -283,12 +283,21 @@ class TestTaxonomyTree(unittest.TestCase):
             self.assertEqual(t1, t2)
 
     def test_reduce_entry(self):
-        self.assertEqual(self.tree.reduce_entry(self.taxonomy_entries[0]).label, "d__Bacteria; p__; c__; o__; f__; g__; s__")
-        self.assertEqual(self.tree.reduce_entry(self.taxonomy_entries[6]).label, "d__Bacteria; p__Proteobacteria; c__Gammaproteobacteria; o__Pseudomonadales; f__Pseudomonadaceae; g__Pseudomonas; s__test_species")
+        self.assertEqual(self.tree.reduce_entry(self.taxonomy_entries[0]).label, "d__Bacteria;p__;c__;o__;f__;g__;s__")
+        self.assertEqual(self.tree.reduce_entry(self.taxonomy_entries[6]).label, "d__Bacteria;p__Proteobacteria;c__Gammaproteobacteria;o__Pseudomonadales;f__Pseudomonadaceae;g__Pseudomonas;s__test_species")
 
     def test_reduce_taxonomy(self):
-        self.assertEqual(self.tree.reduce_label(self.test_label), "d__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
-        self.assertEqual(self.tree.reduce_label(self.invalid_label), "d__Bacteria; p__Proteobacteria; c__; o__; f__; g__; s__")
+        self.assertEqual(self.tree.reduce_label(self.test_label), "d__Bacteria;p__Proteobacteria;c__;o__;f__;g__;s__")
+        self.assertEqual(self.tree.reduce_label(self.invalid_label), "d__Bacteria;p__Proteobacteria;c__;o__;f__;g__;s__")
+
+    def test_num_taxonomies(self):
+        self.assertEqual(self.tree.taxonomy_id_map[0][0].num_taxonomies, 6)
+        self.assertEqual(self.tree.taxonomy_id_map[0][1].num_taxonomies, 1)
+
+    def test_taxonomy_range(self):
+        # A better test case could be written for this...
+        self.assertEqual(self.tree.taxonomy_id_map[0][0].taxonomy_id_range, range(0, 6))
+        self.assertEqual(self.tree.taxonomy_id_map[0][1].taxonomy_id_range, range(6, 7))
 
 
 class TestTaxonomyDb(unittest.TestCase):
@@ -308,8 +317,8 @@ class TestTaxonomyDb(unittest.TestCase):
         for entry in self.taxonomy_entries:
             if entry.label not in self.unique_labels:
                 self.unique_labels.append(entry.label)
-        self.invalid_label = "d__Bacteria; p__Proteobacteria; c__XYZ; o__Acetobacterales; f__; g__; s__"
-        self.test_label = "d__Bacteria; p__Proteobacteria; c__XYZ; o__; f__; g__; s__"
+        self.invalid_label = "d__Bacteria;p__Proteobacteria;c__XYZ;o__Acetobacterales;f__;g__;s__"
+        self.test_label = "d__Bacteria;p__Proteobacteria;c__XYZ;o__;f__;g__;s__"
 
     def tearDown(self):
         """
