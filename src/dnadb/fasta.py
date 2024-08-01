@@ -167,7 +167,7 @@ class FastaDb(ISample[FastaEntry], DbWrapper):
         """
         Sample sequences from the FASTA database.
         """
-        result = np.empty(np.product(shape), dtype=object)
+        result = np.empty(np.prod(shape), dtype=object)
         result[:] = list(map(self.entry, rng.choice(self.length, len(result), replace=True)))
         return result.reshape(shape)
 
@@ -273,7 +273,7 @@ class FastaMappingEntry(ISample[FastaEntry]):
         """
         Sample sequences from the FASTA database.
         """
-        result = np.empty(np.product(shape), dtype=object)
+        result = np.empty(np.prod(shape), dtype=object)
         result[:] = list(map(self.entry, rng.choice(self.length, len(result), replace=True)))
         return result.reshape(shape)
 
