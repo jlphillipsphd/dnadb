@@ -122,16 +122,20 @@ def command_import_multiplexed(config: argparse.Namespace):
         sequence_file_ids: dict[Path, Path] = {}
         for i, sequence_file in tqdm(enumerate(sorted(sequence_files))):
             scratch_file = scratch_path / f"sequences_{i}"
+            try:
+                if sequence_file.name.endswith(".gz"):
+                    file_handle = gzip.open(sequence_file, "rt")
+                else:
+                    file_handle = open(sequence_file)
+                if sequence_file.name.endswith(".fastq") or sequence_file.name.endswith(".fastq.gz"):
+                    sequences = file_handle.readlines()[1::4]
+                else:
+                    sequences = file_handle.readlines()[1::2]
+                file_handle.close()
+            except:
+                print("Unable to open:", sequence_file)
+                continue
             sequence_file_ids[scratch_file] = sequence_file
-            if sequence_file.name.endswith(".gz"):
-                file_handle = gzip.open(sequence_file, "rt")
-            else:
-                file_handle = open(sequence_file)
-            if sequence_file.name.endswith(".fastq") or sequence_file.name.endswith(".fastq.gz"):
-                sequences = file_handle.readlines()[1::4]
-            else:
-                sequences = file_handle.readlines()[1::2]
-            file_handle.close()
             num_processed += len(sequences)
             sequences.sort()
             num_sequences += len(sequences)
