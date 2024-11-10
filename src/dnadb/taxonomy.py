@@ -646,13 +646,13 @@ def read(
     """
     iterator = iter(buffer)
     if header == "auto":
-        sequence_id, taxonomy = next(iterator).strip().split('\t')
+        sequence_id, taxonomy, *_ = next(iterator).strip().split('\t')
         if is_taxonomy(taxonomy):
             yield TaxonomyEntry(sequence_id, taxonomy)
     elif header:
         next(iterator)
     for line in iterator:
-        sequence_id, taxonomy = line.rstrip().split('\t')
+        sequence_id, taxonomy, *_ = line.rstrip().split('\t')
         yield TaxonomyEntry(sequence_id, taxonomy)
 
 
