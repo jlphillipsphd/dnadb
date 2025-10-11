@@ -130,9 +130,9 @@ def command_import_multiplexed(config: argparse.Namespace):
                 if sequence_file.name.endswith(".fastq") or sequence_file.name.endswith(".fastq.gz"):
                     sequences = file_handle.readlines()[1::4]
                 else:
-                    sequences = file_handle.readlines()[1::2]
+                    sequences = [e.sequence for e in fasta.entries(file_handle)]
                 file_handle.close()
-            except:
+            except Exception as e:
                 print("Unable to open:", sequence_file)
                 continue
             sequence_file_ids[scratch_file] = sequence_file
